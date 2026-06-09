@@ -1,6 +1,6 @@
 ### DBOS
 
-DBOS uses postgres to store the workflows, steps, inputs/outputs, statuses, queues and so on. The main tables are:
+DBOS uses Postgres to store the workflows, steps, inputs/outputs, statuses, queues and so on. The main tables are:
 - dbos.workflow_status
 - dbos.operation_outputs
 
@@ -8,6 +8,8 @@ DBOS uses postgres to store the workflows, steps, inputs/outputs, statuses, queu
 The inputs are passed directly to the workflow as a whole, and they can be injected into the context to be accessed inside each step later on.
 
 `operation_outputs` stores each step of the workflow, pointing to the workflow uuid, with the function name that was called for the step and each individual output. These entries are created as the steps are invoked.
+
+In order to run the workflows, it needs to register the workflow `dbos.RegisterWorkflow`, where the workflow will define its steps with `dbos.RunAsStep`, and to trigger the workflow it's done with `dbos.RunWorkflow`.
 
 The example script `main.go` uses some of this features, like calling steps dynamically, injecting random failures into the steps to test the retries, queue and on-demand modes, inside a simple API.
 

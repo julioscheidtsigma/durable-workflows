@@ -44,11 +44,9 @@ func main() {
 	}
 	fmt.Printf("params %+v\n", params)
 
-	// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
+	// the idempotency key will be used as workflow id
 	idempotencyKey := params.GetIdempotencyKey()
 	fmt.Printf("idempotencyKey %+v\n", idempotencyKey)
-	// workflowID := uuid.New().String()
-	// fmt.Printf("workflowID %+v\n", workflowID)
 
 	options := client.StartWorkflowOptions{
 		ID:                       idempotencyKey,

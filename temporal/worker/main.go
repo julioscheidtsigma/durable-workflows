@@ -25,6 +25,7 @@ func main() {
 	w.RegisterWorkflow(workflow.MainWorkflow)
 	// w.RegisterActivity(workflow.FirstWorkflowStep)
 	// w.RegisterActivity(workflow.SecondWorkflowStep)
+	// dynamic activity registration
 	w.RegisterActivity(&workflow.Activities{})
 
 	err = w.Run(worker.InterruptCh())
