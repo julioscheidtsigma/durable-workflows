@@ -1,0 +1,48 @@
+# built artifacts
+**/dist/*
+
+# coverage
+*.coverprofile
+*coverage.txt
+.coverage
+coverage/
+
+# Elastic Beanstalk Files
+*.elasticbeanstalk/*
+*!.elasticbeanstalk/*.cfg.yml
+*!.elasticbeanstalk/*.global.yml
+
+# EDITORS: sublime files
+*.sublime-workspace
+
+# EDITORS: jetbrains
+*.idea
+
+# EDITORS: vscode
+**/*.code-workspace
+.history
+**/lsp/
+.vscode/settings.json
+.metals/
+
+# EDITORS: vim
+*.swp
+
+* bfg-report
+*bfg.jar
+
+# miscellaneous
+*dataentryplatform/views/dist*
+
+# temp files
+*.DS_Store
+*.Trash*
+temp_*
+TEMP_*
+tmp*
+TMP*
+
+**/.claude/settings.local.json
+
+# env files
+.env
