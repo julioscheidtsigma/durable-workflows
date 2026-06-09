@@ -10,7 +10,8 @@ import (
 
 func main() {
 	c, err := client.Dial(client.Options{
-		HostPort: "localhost:7233",
+		HostPort:  "localhost:7233",
+		Namespace: "default",
 	})
 	if err != nil {
 		log.Fatalln("Unable to create client", err)
