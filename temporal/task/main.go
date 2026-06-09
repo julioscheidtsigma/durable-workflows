@@ -53,7 +53,7 @@ func main() {
 		TaskQueue:                workflow.QUEUE,
 		WorkflowExecutionTimeout: time.Minute * 5,
 		WorkflowRunTimeout:       time.Minute * 5,
-		WorkflowTaskTimeout:      time.Second * 10,
+		WorkflowTaskTimeout:      time.Minute * 1,
 	}
 
 	// workflowRun, err := c.ExecuteWorkflow(ctx, options, "MainWorkflow", params)

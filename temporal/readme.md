@@ -1,6 +1,7 @@
 ### Temporal
 
 Temporal has an API to process the workflows, and it provides an UI for visualization.
+
 In order to run workflows, it needs a worker running and listening to the workflows and its activities. On the other end, it needs a client to trigger the execution, therefore in a server/client fashion.
 
 The example scripts are creating a worker and a task starter.
@@ -8,6 +9,8 @@ The worker will register the workflow with `RegisterWorkflow` and its activities
 The client/task will trigger the workflow with `ExecuteWorkflow`, and wait its response with `workflowRun.Get`.
 
 The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
+
+In the UI we can see the workflows, their steps, what has succeeded or failed, the duration of the execution, timeline, the workers that are running, and we can reset the workflows to be executed again.
 
 How to run the worker and task starter:
 
@@ -17,7 +20,7 @@ go mod download
 # worker
 go run worker/main.go
 
-# task - chosing which step to run
+# task - choosing which step to run
 go run task/main.go <RUN_STEP>
 e.g.
 go run task/main.go [0,1,2]
