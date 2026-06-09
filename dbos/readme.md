@@ -9,7 +9,7 @@ The inputs are passed directly to the workflow as a whole, and they can be injec
 
 `operation_outputs` stores each step of the workflow, pointing to the workflow uuid, with the function name that was called for the step and each individual output. These entries are created as the steps are invoked.
 
-In order to run the workflows, it needs to register the workflow `dbos.RegisterWorkflow`, where the workflow will define its steps with `dbos.RunAsStep`, and to trigger the workflow it's done with `dbos.RunWorkflow`.
+In order to run the workflows, it needs to register the workflow `dbos.RegisterWorkflow`, where the workflow will define its steps with `dbos.RunAsStep`. Triggering the workflow is done by `dbos.RunWorkflow`.
 
 The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
 

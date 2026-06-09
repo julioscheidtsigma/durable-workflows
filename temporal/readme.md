@@ -8,7 +8,7 @@ The example scripts are creating a worker and a task starter.
 The worker will register the workflow with `RegisterWorkflow` and its activities with `RegisterActivity`, and it will be listening to its events.
 The client/task will trigger the workflow with `ExecuteWorkflow`, and wait its response with `workflowRun.Get`.
 
-The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
+The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow. However the steps/activities inside the workflow must be registered upfront, which can be achieved with a dynamic type for all the target activities.
 
 In the UI we can see the workflows, their steps, what has succeeded or failed, the duration of the execution, timeline, the workers that are running, and we can reset the workflows to be executed again.
 
