@@ -11,6 +11,8 @@ The inputs are passed directly to the workflow as a whole, and they can be injec
 
 In order to run the workflows, it needs to register the workflow `dbos.RegisterWorkflow`, where the workflow will define its steps with `dbos.RunAsStep`, and to trigger the workflow it's done with `dbos.RunWorkflow`.
 
+The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
+
 The example script `main.go` uses some of this features, like calling steps dynamically, injecting random failures into the steps to test the retries, queue and on-demand modes, inside a simple API.
 
 How to run the API:

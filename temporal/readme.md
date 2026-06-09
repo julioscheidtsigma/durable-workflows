@@ -5,7 +5,9 @@ In order to run workflows, it needs a worker running and listening to the workfl
 
 The example scripts are creating a worker and a task starter.
 The worker will register the workflow with `RegisterWorkflow` and its activities with `RegisterActivity`, and it will be listening to its events.
-The client/task started will trigger the workflow with `ExecuteWorkflow`, and wait its response with `workflowRun.Get`.
+The client/task will trigger the workflow with `ExecuteWorkflow`, and wait its response with `workflowRun.Get`.
+
+The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
 
 How to run the worker and task starter:
 
