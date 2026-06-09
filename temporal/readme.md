@@ -20,10 +20,10 @@ go mod download
 # worker
 go run worker/main.go
 
-# task - choosing which step to run
-go run task/main.go <RUN_STEP>
+# task - passing the URN and which step to run
+go run task/main.go "<URN>" <RUN_STEP>
 e.g.
-go run task/main.go [0,1,2]
+go run task/main.go "[URN_001]" [0,1,2]
 ```
 
 Locally on a Mac, we can install and run both Temporal API and UI with this:

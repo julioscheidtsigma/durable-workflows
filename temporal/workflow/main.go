@@ -78,12 +78,10 @@ func MainWorkflow(ctx workflow.Context, params WorkflowParams) (WorkflowResult, 
 	}
 
 	opts := workflow.ActivityOptions{
-		ScheduleToStartTimeout: 10 * time.Second,
-		StartToCloseTimeout:    5 * time.Second,
-		ScheduleToCloseTimeout: 10 * time.Second,
-		HeartbeatTimeout:       0,
-		TaskQueue:              activities.TaskQueue,
-		RetryPolicy:            retryPolicy,
+		StartToCloseTimeout: time.Minute * 1,
+		HeartbeatTimeout:    0,
+		TaskQueue:           activities.TaskQueue,
+		RetryPolicy:         retryPolicy,
 	}
 	ctx = workflow.WithActivityOptions(ctx, opts)
 

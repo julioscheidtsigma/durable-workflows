@@ -23,11 +23,14 @@ func main() {
 	}
 	defer c.Close()
 
-	urn := "URN_001"
+	urn := ""
+	if len(os.Args) > 1 {
+		urn = os.Args[1] // get URN from command line argument
+	}
 
 	runStep := workflow.RUN_STEP_0 // default to run all steps
-	if len(os.Args) > 1 {
-		runStepStr := os.Args[1] // get runStep from command line argument
+	if len(os.Args) > 2 {
+		runStepStr := os.Args[2] // get runStep from command line argument
 		switch runStepStr {
 		case "0":
 			runStep = workflow.RUN_STEP_0
