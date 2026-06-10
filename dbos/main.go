@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -190,11 +191,13 @@ func main() {
 
 	ctx := context.Background()
 
+	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	// Initialize a DBOS context
 	dbosCtx, err := dbos.NewDBOSContext(ctx, dbos.Config{
-		DatabaseURL:    dbURL,
-		AppName:        "edd",
-		DatabaseSchema: "dbos", // default
+		DatabaseURL:     dbURL,
+		AppName:         "edd",
+		DatabaseSchema:  "dbos", // default
+		ConductorAPIKey: conductorKey,
 	})
 	if err != nil {
 		fmt.Printf("Error creating DBOS: %s\n", err)
