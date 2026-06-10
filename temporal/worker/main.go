@@ -24,6 +24,10 @@ func main() {
 	})
 
 	w.RegisterWorkflow(workflow.MainWorkflow)
+
+	// register child workflows
+	w.RegisterWorkflow(workflow.MainWorkflowChild)
+
 	// w.RegisterActivity(workflow.FirstWorkflowStep)
 	// w.RegisterActivity(workflow.SecondWorkflowStep)
 	// dynamic activity registration

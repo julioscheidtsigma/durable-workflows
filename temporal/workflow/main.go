@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -65,6 +66,12 @@ func (a *Activities) SecondWorkflowStep(ctx context.Context, params WorkflowPara
 	return a.WorkflowStep(ctx, "SecondWorkflowStep", params)
 }
 
+func MainWorkflowChild(ctx workflow.Context, params WorkflowParams) (string, error) {
+	fmt.Printf("MainWorkflowChild params: %+v\n", params)
+
+	return "MainWorkflowChild succeeded", nil
+}
+
 func MainWorkflow(ctx workflow.Context, params WorkflowParams) (WorkflowResult, error) {
 	fmt.Printf("MainWorkflow params: %+v\n", params)
 
@@ -107,6 +114,20 @@ func MainWorkflow(ctx workflow.Context, params WorkflowParams) (WorkflowResult, 
 			return WorkflowResult{}, err
 		}
 	}
+
+	childWorkflowID := uuid.New().String()
+	fmt.Printf("childWorkflowID %+v\n", childWorkflowID)
+	cwo := workflow.ChildWorkflowOptions{
+		WorkflowID: childWorkflowID,
+	}
+	ctx = workflow.WithChildOptions(ctx, cwo)
+
+	var childOutput string
+	err = workflow.ExecuteChildWorkflow(ctx, MainWorkflowChild, params).Get(ctx, &childOutput)
+	if err != nil {
+		return WorkflowResult{}, err
+	}
+	fmt.Printf("MainWorkflow childOutput: %+v\n", childOutput)
 
 	results := WorkflowResult{OutputStep1: outputStep1, OutputStep2: outputStep2}
 	return results, nil
