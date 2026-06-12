@@ -55,6 +55,8 @@ curl -s -X GET "http://localhost:8585/workflow/rerun/16411325941583066502"
 
 [https://docs.dbos.dev/production/checklist](https://docs.dbos.dev/production/checklist)
 
+[https://github.com/dbos-inc/dbos-transact-golang#features](https://github.com/dbos-inc/dbos-transact-golang#features)
+
 [https://docs.dbos.dev/python/examples/outbox](https://docs.dbos.dev/python/examples/outbox)
 
 [https://docs.dbos.dev/python/examples/deploy-tracker-slackbot](https://docs.dbos.dev/python/examples/deploy-tracker-slackbot)

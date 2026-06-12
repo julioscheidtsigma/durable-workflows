@@ -174,7 +174,6 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 			RunAsQueue: runAsQueue,
 			RunStep:    runStep,
 		}
-		fmt.Printf("params %+v\n", params)
 
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		idempotencyKey := params.GetIdempotencyKey()
@@ -223,11 +222,9 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 				break
 			}
 		}
-		fmt.Printf("stepFailed %+v\n", stepFailed)
 
 		forkedWorkflowID := uuid.New().String() // new uuid
-		fmt.Printf("forkedWorkflowID %+v\n", forkedWorkflowID)
-		fmt.Printf("queue.Name %+v\n", queue.Name)
+		fmt.Printf("ReRunWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
 		_, err = dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
 			OriginalWorkflowID: workflowID,
@@ -252,7 +249,9 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// fmt.Fprint(w, output.ToJSON())
+
+		apiResponse, _ := json.Marshal(handle)
+		fmt.Fprint(w, string(apiResponse))
 	}
 }
 
@@ -284,6 +283,7 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 			}
 			items = append(items, item)
 		}
+
 		apiResponse, _ := json.Marshal(items)
 		fmt.Fprint(w, string(apiResponse))
 	}
