@@ -29,16 +29,22 @@ Examples to call the API and execute the workflows:
 
 ```bash
 # This will enqueue the workflow (`runAsQueue=true`), execute all steps (`runStep=0`), and just return the workflow was triggered.
-curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=true&runStep=0"
-# MainHandler: workflow triggered successfully
+curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=true&runStep=0"
+# StartWorkflowHandler: workflow triggered successfully
 
 # This will call the workflow immediately, execute all steps, and return the outputs from both steps.
-curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=false&runStep=0"
-# {FirstWorkflowStep succeeded SecondWorkflowStep succeeded}
+curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=2"
+# {"outputStep1":"","outputStep2":"SecondWorkflowStep succeeded"}
 
 # This will call the workflow immediately, execute only the first step, and return the outputs from it.
-curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=false&runStep=1"
-# {FirstWorkflowStep succeeded}
+curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=1"
+# {"outputStep1":"FirstWorkflowStep succeeded","outputStep2":""}
+
+# list workflows
+curl -s -X GET "http://localhost:8585/workflow"
+
+# rerun a workflow
+curl -s -X GET "http://localhost:8585/workflow/rerun/16411325941583066502"
 ```
 
 #### Docs
@@ -48,5 +54,9 @@ curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=false&runStep=1
 [https://docs.dbos.dev/golang/tutorials/workflow-communication#workflow-events](https://docs.dbos.dev/golang/tutorials/workflow-communication#workflow-events)
 
 [https://docs.dbos.dev/production/checklist](https://docs.dbos.dev/production/checklist)
+
+[https://docs.dbos.dev/python/examples/outbox](https://docs.dbos.dev/python/examples/outbox)
+
+[https://docs.dbos.dev/python/examples/deploy-tracker-slackbot](https://docs.dbos.dev/python/examples/deploy-tracker-slackbot)
 
 [https://docs.dbos.dev/python/examples/hacker-news-agent](https://docs.dbos.dev/python/examples/hacker-news-agent)

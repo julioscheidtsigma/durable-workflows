@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/google/uuid"
 )
 
 var (
@@ -45,8 +47,26 @@ type WorkflowResult struct {
 	OutputStep2 string `json:"outputStep2"`
 }
 
+func (wr WorkflowResult) ToJSON() string {
+	apiResponse, _ := json.Marshal(wr)
+	return string(apiResponse)
+}
+
 type WorkflowEvent struct {
 	Name string `json:"name"`
+}
+
+type WorkflowItem struct {
+	UUID          string    `json:"uuid"`
+	Status        string    `json:"status"`
+	Name          string    `json:"name"`
+	Input         string    `json:"input"`
+	Output        string    `json:"output"`
+	Attempts      int       `json:"attempts"`
+	Queue         string    `json:"queue"`
+	Serialization string    `json:"serialization"`
+	StartedAt     time.Time `json:"startedAt"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 func (p WorkflowParams) GetIdempotencyKey() string {
@@ -78,6 +98,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if runAllSteps || params.RunStep == RUN_STEP_1 {
 		outputStep1, err = dbos.RunAsStep(dbosCtx, FirstWorkflowStep, opts...)
 		if err != nil {
+			fmt.Printf("MainWorkflow: FirstWorkflowStep: error %+v\n", err)
 			return WorkflowResult{}, err
 		}
 		fmt.Printf("MainWorkflow: FirstWorkflowStep result: %+v\n", outputStep1)
@@ -86,6 +107,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if runAllSteps || params.RunStep == RUN_STEP_2 {
 		outputStep2, err = dbos.RunAsStep(dbosCtx, SecondWorkflowStep, opts...)
 		if err != nil {
+			fmt.Printf("MainWorkflow: SecondWorkflowStep: error %+v\n", err)
 			return WorkflowResult{}, err
 		}
 		fmt.Printf("MainWorkflow: SecondWorkflowStep result: %+v\n", outputStep2)
@@ -130,11 +152,12 @@ func SecondWorkflowStep(ctx context.Context) (string, error) {
 	return WorkflowStep(ctx, "SecondWorkflowStep")
 }
 
-func MainHandler(ctx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		urn := r.PathValue("urn")
-		runAsQueue := r.URL.Query().Get("runAsQueue") == "true"
-		runStepStr := r.URL.Query().Get("runStep")
+		query := r.URL.Query()
+		urn := query.Get("urn")
+		runAsQueue := query.Get("runAsQueue") == "true"
+		runStepStr := query.Get("runStep")
 		runStep := RUN_STEP_0 // default to run all steps
 		switch runStepStr {
 		case "0":
@@ -155,36 +178,114 @@ func MainHandler(ctx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFun
 
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		idempotencyKey := params.GetIdempotencyKey()
-		fmt.Printf("MainHandler: idempotencyKey %+v\n", idempotencyKey)
+		fmt.Printf("StartWorkflowHandler: idempotencyKey %+v\n", idempotencyKey)
 
 		if params.RunAsQueue {
-			// fire and forget - send a durable workflow execution to a queue
-			handle, err := dbos.RunWorkflow(ctx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
+			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "MainHandler: workflow finished with error %+v\n", err)
+				fmt.Fprintf(w, "StartWorkflowHandler: workflow finished with error %+v\n", err)
 				return
 			}
 
 			eventsChan <- handle
 
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "MainHandler: workflow triggered successfully")
+			fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
 		} else {
 			// run a durable workflow and gather results right away
-			handle, err := dbos.RunWorkflow(ctx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey))
+			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey))
 			output, err := handle.GetResult()
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "MainHandler: workflow finished with error %+v\n", err)
+				fmt.Fprintf(w, "StartWorkflowHandler: workflow finished with error %+v\n", err)
 				return
 			}
 
 			eventsChan <- handle
 
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, output)
+			fmt.Fprint(w, output.ToJSON())
 		}
+	}
+}
+
+func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		workflowID := r.PathValue("uuid")
+
+		workflowSteps, err := dbosCtx.GetWorkflowSteps(dbosCtx, workflowID)
+		stepFailed := uint(0)
+		for _, step := range workflowSteps {
+			if step.Error != nil {
+				stepFailed = uint(step.StepID)
+				break
+			}
+		}
+		fmt.Printf("stepFailed %+v\n", stepFailed)
+
+		forkedWorkflowID := uuid.New().String() // new uuid
+		fmt.Printf("forkedWorkflowID %+v\n", forkedWorkflowID)
+		fmt.Printf("queue.Name %+v\n", queue.Name)
+
+		_, err = dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
+			OriginalWorkflowID: workflowID,
+			ForkedWorkflowID:   forkedWorkflowID,
+			QueueName:          queue.Name,
+			StartStep:          stepFailed,
+		})
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ReRunWorkflowHandler: error re-running workflow %+v\n", err)
+			return
+		}
+
+		handle, err := dbos.ResumeWorkflow[WorkflowResult](dbosCtx, forkedWorkflowID, dbos.WithResumeQueue(queue.Name))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ReRunWorkflowHandler: error re-running workflow %+v\n", err)
+			return
+		}
+
+		eventsChan <- handle
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// fmt.Fprint(w, output.ToJSON())
+	}
+}
+
+func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		workflows, err := dbos.ListWorkflows(dbosCtx, dbos.WithQueueName(QUEUE))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ListWorkflowsHandler: error listing workflows %+v\n", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		items := make([]WorkflowItem, 0)
+		for _, w := range workflows {
+			item := WorkflowItem{
+				UUID:          w.ID,
+				Status:        string(w.Status),
+				Name:          w.Name,
+				Input:         w.Input.(string),
+				Output:        w.Output.(string),
+				Attempts:      w.Attempts,
+				Queue:         w.QueueName,
+				Serialization: w.Serialization,
+				StartedAt:     w.StartedAt,
+				CreatedAt:     w.CreatedAt,
+			}
+			items = append(items, item)
+		}
+		apiResponse, _ := json.Marshal(items)
+		fmt.Fprint(w, string(apiResponse))
 	}
 }
 
@@ -197,11 +298,11 @@ func CollectWorkflowResults(resultsChan chan WorkflowResult) {
 	}
 }
 
-func CollectWorkflowEvents(ctx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
+func CollectWorkflowEvents(dbosCtx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
 	for handle := range eventsChan {
 		tmp := handle
 		go func(h dbos.WorkflowHandle[WorkflowResult]) {
-			e, err := dbos.GetEvent[WorkflowEvent](ctx, h.GetWorkflowID(), EVENT_STATUS, 30*time.Second)
+			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 30*time.Second)
 			if err != nil {
 				return
 			}
@@ -234,8 +335,18 @@ func main() {
 
 	// Register a workflow
 	dbos.RegisterWorkflow(dbosCtx, MainWorkflow)
-	// create a queue
-	eddQueue := dbos.NewWorkflowQueue(dbosCtx, QUEUE)
+
+	// Create a queue
+	eddQueue := dbos.NewWorkflowQueue(dbosCtx, QUEUE,
+		dbos.WithWorkerConcurrency(10), // set the number of concurrent workers processing the queue
+		dbos.WithRateLimiter(&dbos.RateLimiter{
+			Limit:  100,
+			Period: 60 * time.Second, // 100 workflows per minute
+		}),
+		dbos.WithPriorityEnabled(),
+		dbos.WithQueueBasePollingInterval(1*time.Second),
+		dbos.WithQueueMaxPollingInterval(60*time.Second),
+	)
 
 	// Launch DBOS
 	errLaunch := dbos.Launch(dbosCtx)
@@ -248,8 +359,14 @@ func main() {
 	go CollectWorkflowResults(resultsChan)
 	go CollectWorkflowEvents(dbosCtx, eventsChan)
 
-	mainHandler := MainHandler(dbosCtx, eddQueue)
-	http.HandleFunc("/trigger/{urn}", mainHandler)
+	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
+	http.HandleFunc("/workflow/start", startWorkflowHandler)
+
+	rerunWorkflowHandler := ReRunWorkflowHandler(dbosCtx, eddQueue)
+	http.HandleFunc("/workflow/rerun/{uuid}", rerunWorkflowHandler)
+
+	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, eddQueue)
+	http.HandleFunc("/workflow", listWorkflowsHandler)
 
 	errListen := http.ListenAndServe(":8585", nil)
 	if errListen != nil {
