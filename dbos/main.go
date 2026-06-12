@@ -21,6 +21,7 @@ var (
 )
 
 var resultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
+var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
 
 const (
 	RUN_STEP_0 int = iota // run all steps
@@ -28,7 +29,10 @@ const (
 	RUN_STEP_2            // run only step 2
 )
 
-const QUEUE = "edd-queue"
+const (
+	QUEUE        = "edd-queue"
+	EVENT_STATUS = "status"
+)
 
 type WorkflowParams struct {
 	URN        string `json:"urn"`
@@ -39,6 +43,10 @@ type WorkflowParams struct {
 type WorkflowResult struct {
 	OutputStep1 string `json:"outputStep1"`
 	OutputStep2 string `json:"outputStep2"`
+}
+
+type WorkflowEvent struct {
+	Name string `json:"name"`
 }
 
 func (p WorkflowParams) GetIdempotencyKey() string {
@@ -81,6 +89,12 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 			return WorkflowResult{}, err
 		}
 		fmt.Printf("MainWorkflow: SecondWorkflowStep result: %+v\n", outputStep2)
+	}
+
+	// sending events
+	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "WORKFLOW_DONE"})
+	if err != nil {
+		return WorkflowResult{}, err
 	}
 
 	results := WorkflowResult{OutputStep1: outputStep1, OutputStep2: outputStep2}
@@ -145,12 +159,15 @@ func MainHandler(ctx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFun
 
 		if params.RunAsQueue {
 			// fire and forget - send a durable workflow execution to a queue
-			_, err := dbos.RunWorkflow(ctx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
+			handle, err := dbos.RunWorkflow(ctx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, "MainHandler: workflow finished with error %+v\n", err)
 				return
 			}
+
+			eventsChan <- handle
+
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, "MainHandler: workflow triggered successfully")
 		} else {
@@ -162,22 +179,34 @@ func MainHandler(ctx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFun
 				fmt.Fprintf(w, "MainHandler: workflow finished with error %+v\n", err)
 				return
 			}
+
+			eventsChan <- handle
+
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, output)
 		}
 	}
 }
 
-func ProcessWorkflowResult(result WorkflowResult) {
-	fmt.Printf("ProcessWorkflowResult: Workflow result: %+v\n", result)
-	// do some stuff
-}
-
 func CollectWorkflowResults(resultsChan chan WorkflowResult) {
 	for result := range resultsChan {
+		tmp := result
 		go func(r WorkflowResult) {
-			ProcessWorkflowResult(r)
-		}(result)
+			fmt.Printf("CollectWorkflowResults: Workflow result: %+v\n", r)
+		}(tmp)
+	}
+}
+
+func CollectWorkflowEvents(ctx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
+	for handle := range eventsChan {
+		tmp := handle
+		go func(h dbos.WorkflowHandle[WorkflowResult]) {
+			e, err := dbos.GetEvent[WorkflowEvent](ctx, h.GetWorkflowID(), EVENT_STATUS, 30*time.Second)
+			if err != nil {
+				return
+			}
+			fmt.Printf("CollectWorkflowEvents: Workflow event: %+v\n", e)
+		}(tmp)
 	}
 }
 
@@ -217,6 +246,7 @@ func main() {
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
 	go CollectWorkflowResults(resultsChan)
+	go CollectWorkflowEvents(dbosCtx, eventsChan)
 
 	mainHandler := MainHandler(dbosCtx, eddQueue)
 	http.HandleFunc("/trigger/{urn}", mainHandler)
