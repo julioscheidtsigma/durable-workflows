@@ -9,6 +9,8 @@ The inputs are passed directly to the workflow as a whole, and they can be injec
 
 `operation_outputs` stores each step of the workflow, pointing to the workflow uuid, with the function name that was called for the step and each individual output. These entries are created as the steps are invoked.
 
+`workflow_events` stores the events, pointing to the workflow uuid, and `workflow_events_history` stores each event with the key they were sent.
+
 In order to run the workflows, it needs to register the workflow `dbos.RegisterWorkflow`, where the workflow will define its steps with `dbos.RunAsStep`. Triggering the workflow is done by `dbos.RunWorkflow`.
 
 The execution of steps inside the workflow can be dynamic based on the workflow parameters, global values or output from previous steps inside the same workflow.
@@ -38,3 +40,13 @@ curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=false&runStep=0
 curl -s -X GET "http://localhost:8585/trigger/URN_001?runAsQueue=false&runStep=1"
 # {FirstWorkflowStep succeeded}
 ```
+
+#### Docs
+
+[https://docs.temporal.io/develop/go/set-up-your-local-go](https://docs.temporal.io/develop/go/set-up-your-local-go)
+
+[https://docs.dbos.dev/golang/tutorials/workflow-communication#workflow-events](https://docs.dbos.dev/golang/tutorials/workflow-communication#workflow-events)
+
+[https://docs.dbos.dev/production/checklist](https://docs.dbos.dev/production/checklist)
+
+[https://docs.dbos.dev/python/examples/hacker-news-agent](https://docs.dbos.dev/python/examples/hacker-news-agent)
