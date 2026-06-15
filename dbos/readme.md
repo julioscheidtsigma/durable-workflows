@@ -32,7 +32,7 @@ Examples to call the API and execute the workflows:
 curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=true&runStep=0"
 # StartWorkflowHandler: workflow triggered successfully
 
-# This will call the workflow immediately, execute all steps, and return the outputs from both steps.
+# This will call the workflow immediately, execute only the second step, and return the outputs from both steps.
 curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=2"
 # {"outputStep1":"","outputStep2":"SecondWorkflowStep succeeded"}
 
