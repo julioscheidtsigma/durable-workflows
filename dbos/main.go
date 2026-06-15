@@ -23,7 +23,7 @@ var (
 )
 
 var queueResultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
-var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
+// var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
 
 const (
 	RUN_STEP_ALL                  int = iota // run all steps
@@ -62,9 +62,9 @@ func (wr WorkflowResult) ToJSON() string {
 	return string(apiResponse)
 }
 
-type WorkflowEvent struct {
-	Name string `json:"name"`
-}
+// type WorkflowEvent struct {
+// 	Name string `json:"name"`
+// }
 
 type WorkflowItem struct {
 	UUID          string    `json:"uuid"`
@@ -139,6 +139,10 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 		})
 	}
 
+	if params.RunAsQueue {
+		time.Sleep(15 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
+	}
+
 	go func() {
 		wg.Wait()
 		fmt.Printf("MainWorkflowChildPhase1: all steps done, closing outputsChan\n")
@@ -204,6 +208,10 @@ func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 		}
 	})
 
+	if params.RunAsQueue {
+		time.Sleep(30 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
+	}
+
 	go func() {
 		wg.Wait()
 		fmt.Printf("MainWorkflowChildPhase2: all steps done, closing outputsChan\n")
@@ -242,32 +250,31 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase2, params)
-	if err != nil {
-		return WorkflowResult{}, err
-	}
-
-	// here we are calling the results after starting all phases,
-	// but this can be sequential as well if there are dependencies between phases
+	// here we are calling the results right after starting the phase,
+	// to simulate dependencies between phases
 	resultPhase1, err := handlePhase1.GetResult()
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-	// sending events
-	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_1_FINISHED"})
+	// // sending events
+	// err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_1_FINISHED"})
+	// if err != nil {
+	// 	return WorkflowResult{}, err
+	// }
+
+	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase2, params)
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-
 	resultPhase2, err := handlePhase2.GetResult()
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-	// sending events
-	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_2_FINISHED"})
-	if err != nil {
-		return WorkflowResult{}, err
-	}
+	// // sending events
+	// err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_2_FINISHED"})
+	// if err != nil {
+	// 	return WorkflowResult{}, err
+	// }
 
 	results := WorkflowResult{
 		WorkflowPhase1Result: resultPhase1,
@@ -283,14 +290,11 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 }
 
 func GenericWorkflowStep(ctx context.Context, stepName string) (string, error) {
-	params := ctx.Value("params").(WorkflowParams)
+	// params := ctx.Value("params").(WorkflowParams)
 	// inject random failure to test retries
 	randNum := rand.IntN(2) // generates a random number between 0 and 1
 	if randNum == 1 {
 		return "", errors.New("simulated error in the step")
-	}
-	if params.RunAsQueue {
-		time.Sleep(2 * time.Second)
 	}
 	return fmt.Sprintf("%s succeeded", stepName), nil
 }
@@ -343,14 +347,14 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		fmt.Printf("StartWorkflowHandler: idempotencyKey %+v\n", idempotencyKey)
 
 		if params.RunAsQueue {
-			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
+			_, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
 				return
 			}
 
-			eventsChan <- handle
+			// eventsChan <- handle
 
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
@@ -370,7 +374,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 				return
 			}
 
-			eventsChan <- handle
+			// eventsChan <- handle
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -427,7 +431,7 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 			return
 		}
 
-		eventsChan <- handle
+		// eventsChan <- handle
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -488,18 +492,18 @@ func CollectWorkflowResults(queueResultsChan chan WorkflowResult) {
 	}
 }
 
-func CollectWorkflowEvents(dbosCtx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
-	for handle := range eventsChan {
-		tmp := handle
-		go func(h dbos.WorkflowHandle[WorkflowResult]) {
-			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 60*time.Second)
-			if err != nil {
-				return
-			}
-			fmt.Printf("CollectWorkflowEvents: Workflow event: %+v\n", e)
-		}(tmp)
-	}
-}
+// func CollectWorkflowEvents(dbosCtx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
+// 	for handle := range eventsChan {
+// 		tmp := handle
+// 		go func(h dbos.WorkflowHandle[WorkflowResult]) {
+// 			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 60*time.Second)
+// 			if err != nil {
+// 				return
+// 			}
+// 			fmt.Printf("CollectWorkflowEvents: Workflow event: %+v\n", e)
+// 		}(tmp)
+// 	}
+// }
 
 func main() {
 	user := "root"
@@ -549,7 +553,7 @@ func main() {
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
 	go CollectWorkflowResults(queueResultsChan)
-	go CollectWorkflowEvents(dbosCtx, eventsChan)
+	// go CollectWorkflowEvents(dbosCtx, eventsChan)
 
 	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
 	http.HandleFunc("/workflow/start", startWorkflowHandler)
@@ -565,5 +569,5 @@ func main() {
 		fmt.Printf("Error starting server: %s\n", errListen)
 	}
 	close(queueResultsChan) // only reached when server exits
-	close(eventsChan)
+	// close(eventsChan)
 }

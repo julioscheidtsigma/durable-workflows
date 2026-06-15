@@ -62,3 +62,63 @@ curl -s -X GET "http://localhost:8585/workflow/rerun/13519425556928471554"
 [https://docs.dbos.dev/python/examples/deploy-tracker-slackbot](https://docs.dbos.dev/python/examples/deploy-tracker-slackbot)
 
 [https://docs.dbos.dev/python/examples/hacker-news-agent](https://docs.dbos.dev/python/examples/hacker-news-agent)
+
+#### Useful queries
+
+```sql
+-- query to bring each step executed within the workflow
+WITH recursive recursive_outputs as (
+  select workflow_uuid, child_workflow_id,
+      function_name, decode(output, 'base64') as output,
+      ((string_to_array(child_workflow_id, '-'))[2]::int + 1) as child_global_level,
+      function_id as global_level,
+      0 as local_level,
+      to_timestamp(started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at, to_timestamp(completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
+    from dbos.operation_outputs
+    where workflow_uuid = '?' and function_name <> 'DBOS.setEvent' and function_name <> 'DBOS.getResult'
+  union
+    select o.workflow_uuid, o.child_workflow_id,
+      o.function_name, decode(o.output, 'base64') as output,
+      null as child_global_level,
+      ((string_to_array(o.workflow_uuid, '-'))[2]::int + 1) as global_level,
+      o.function_id as local_level,
+      to_timestamp(o.started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at,
+      to_timestamp(o.completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
+    from dbos.operation_outputs o
+    join recursive_outputs ro on ro.child_workflow_id = o.workflow_uuid
+    where o.function_name <> 'DBOS.setEvent' and o.function_name <> 'DBOS.getResult'
+)
+select *
+from recursive_outputs
+order by global_level desc, local_level desc;
+
+
+-- enqueue a workflow
+SELECT dbos.enqueue_workflow(
+    workflow_name => 'main.MainWorkflow',
+    queue_name => 'edd-queue',
+    positional_args => ARRAY[
+        CAST('{"urn":"URN_001","runAsQueue":true,"runStep":1}' AS json)
+    ],
+    workflow_id => '?',
+    priority => 1
+);
+
+
+-- analytics
+WITH daily_workflows AS (
+  SELECT
+  DATE_TRUNC('day', TO_TIMESTAMP(created_at / 1000)) AS day,
+  workflow_uuid
+  FROM dbos.workflow_status
+)
+SELECT
+  dw.day,
+  COUNT(DISTINCT dw.workflow_uuid) AS workflow_count,
+  COUNT(oo.workflow_uuid) AS step_count,
+  COUNT(DISTINCT dw.workflow_uuid) + COUNT(oo.workflow_uuid) AS total_checkpoints
+FROM daily_workflows dw
+LEFT JOIN dbos.operation_outputs oo ON dw.workflow_uuid = oo.workflow_uuid
+GROUP BY dw.day
+ORDER BY dw.day DESC;
+```
