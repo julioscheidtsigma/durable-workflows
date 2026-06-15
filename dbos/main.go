@@ -150,7 +150,7 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 	}()
 
 	// collect outputs from steps
-	results := WorkflowPhase1Result{}
+	results := &WorkflowPhase1Result{}
 	for output := range outputsChan {
 		if output.err != nil {
 			// if any step failed, return error to trigger workflow retry
@@ -162,10 +162,11 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 			results.OutputDataCollection = output.output
 		case RUN_STEP_EVIDENCES_COLLECTION:
 			results.OutputEvidencesCollection = output.output
+		default:
 		}
 	}
 
-	return results, nil
+	return *results, nil
 }
 
 func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase2Result, error) {
@@ -219,7 +220,7 @@ func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 	}()
 
 	// collect outputs from steps
-	results := WorkflowPhase2Result{}
+	results := &WorkflowPhase2Result{}
 	for output := range outputsChan {
 		if output.err != nil {
 			// if any step failed, return error to trigger workflow retry
@@ -231,10 +232,11 @@ func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 			results.OutputPepModule = output.output
 		case 2:
 			results.OutputSanctionsModule = output.output
+		default:
 		}
 	}
 
-	return results, nil
+	return *results, nil
 }
 
 func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResult, error) {
