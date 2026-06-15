@@ -44,7 +44,7 @@ curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=fals
 curl -s -X GET "http://localhost:8585/workflow"
 
 # rerun a workflow
-curl -s -X GET "http://localhost:8585/workflow/rerun/13519425556928471554"
+curl -s -X GET "http://localhost:8585/workflow/rerun/11940812423115777703/0"
 ```
 
 #### Docs
