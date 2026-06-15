@@ -14,7 +14,6 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
-	"github.com/google/uuid"
 )
 
 var (
@@ -27,9 +26,9 @@ var queueResultsChan = make(chan WorkflowResult, 100) // buffered channel to hol
 var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
 
 const (
-	RUN_STEP_0 int = iota // run all steps
-	RUN_STEP_1            // run only step 1
-	RUN_STEP_2            // run only step 2
+	RUN_STEP_ALL                  int = iota // run all steps
+	RUN_STEP_DATA_COLLECTION                 // run only step 1
+	RUN_STEP_EVIDENCES_COLLECTION            // run only step 2
 )
 
 const (
@@ -40,12 +39,13 @@ const (
 type WorkflowParams struct {
 	URN        string `json:"urn"`
 	RunAsQueue bool   `json:"runAsQueue"`
-	RunStep    int    `json:"runStep"` // optional param to control which step to run, default is 0 which means run all steps
+	RunStep    int    `json:"runStep"`  // optional param to control which step to run, default is 0 which means run all steps
+	Restarts   int    `json:"restarts"` // optional param to control how many times the workflow has been restarted, default is 0
 }
 
 type WorkflowResult struct {
-	OutputStep1 string `json:"outputStep1"`
-	OutputStep2 string `json:"outputStep2"`
+	OutputDataCollection      string `json:"outputDataCollection"`
+	OutputEvidencesCollection string `json:"outputEvidencesCollection"`
 }
 
 func (wr WorkflowResult) ToJSON() string {
@@ -75,6 +75,14 @@ func (p WorkflowParams) GetIdempotencyKey() string {
 	_, _ = hash.WriteString(p.URN)
 	_, _ = hash.WriteString(strconv.FormatBool(p.RunAsQueue))
 	_, _ = hash.WriteString(strconv.Itoa(int(p.RunStep)))
+	_, _ = hash.WriteString(strconv.Itoa(int(p.Restarts)))
+	return strconv.FormatUint(hash.Sum64(), 10)
+}
+
+func IdempotencyKeyAddSuffix(baseKey string, suffix string) string {
+	hash := xxhash.New()
+	_, _ = hash.WriteString(baseKey)
+	_, _ = hash.WriteString(suffix)
 	return strconv.FormatUint(hash.Sum64(), 10)
 }
 
@@ -91,41 +99,41 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 		output string
 		err    error
 	}
-	runAllSteps := params.RunStep == RUN_STEP_0
+	runAllSteps := params.RunStep == RUN_STEP_ALL
 
 	wg := sync.WaitGroup{}
 	outputsChan := make(chan OutputStep) // channel to collect outputs from steps, will be closed after all steps are done
 
 	// run both steps in parallel
-	if runAllSteps || params.RunStep == RUN_STEP_1 {
+	if runAllSteps || params.RunStep == RUN_STEP_DATA_COLLECTION {
 		wg.Go(func() {
-			output, err := dbos.RunAsStep(dbosCtx, FirstWorkflowStep, opts...)
+			output, err := dbos.RunAsStep(dbosCtx, DataCollectionStep, opts...)
 			if err != nil {
-				fmt.Printf("MainWorkflow: FirstWorkflowStep: error %+v\n", err)
-				outputsChan <- OutputStep{step: RUN_STEP_1, err: err}
+				fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep: error %+v\n", err)
+				outputsChan <- OutputStep{step: RUN_STEP_DATA_COLLECTION, err: err}
 			} else {
-				fmt.Printf("MainWorkflow: FirstWorkflowStep result: %+v\n", output)
-				outputsChan <- OutputStep{step: RUN_STEP_1, output: output}
+				fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep result: %+v\n", output)
+				outputsChan <- OutputStep{step: RUN_STEP_DATA_COLLECTION, output: output}
 			}
 		})
 	}
 
-	if runAllSteps || params.RunStep == RUN_STEP_2 {
+	if runAllSteps || params.RunStep == RUN_STEP_EVIDENCES_COLLECTION {
 		wg.Go(func() {
-			output, err := dbos.RunAsStep(dbosCtx, SecondWorkflowStep, opts...)
+			output, err := dbos.RunAsStep(dbosCtx, EvidencesCollectionStep, opts...)
 			if err != nil {
-				fmt.Printf("MainWorkflow: SecondWorkflowStep: error %+v\n", err)
-				outputsChan <- OutputStep{step: RUN_STEP_2, err: err}
+				fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep: error %+v\n", err)
+				outputsChan <- OutputStep{step: RUN_STEP_EVIDENCES_COLLECTION, err: err}
 			} else {
-				fmt.Printf("MainWorkflow: SecondWorkflowStep result: %+v\n", output)
-				outputsChan <- OutputStep{step: RUN_STEP_2, output: output}
+				fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep result: %+v\n", output)
+				outputsChan <- OutputStep{step: RUN_STEP_EVIDENCES_COLLECTION, output: output}
 			}
 		})
 	}
 
 	go func() {
 		wg.Wait()
-		fmt.Printf("MainWorkflow: all steps done, closing outputsChan\n")
+		fmt.Printf("MainWorkflowChildPhase1: all steps done, closing outputsChan\n")
 		close(outputsChan)
 	}()
 
@@ -136,11 +144,12 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 			// if any step failed, return error to trigger workflow retry
 			return WorkflowResult{}, output.err
 		}
+		fmt.Printf("MainWorkflowChildPhase1: output.step %+v\n", output.step)
 		switch output.step {
-		case RUN_STEP_1:
-			results.OutputStep1 = output.output
-		case RUN_STEP_2:
-			results.OutputStep2 = output.output
+		case RUN_STEP_DATA_COLLECTION:
+			results.OutputDataCollection = output.output
+		case RUN_STEP_EVIDENCES_COLLECTION:
+			results.OutputEvidencesCollection = output.output
 		}
 	}
 
@@ -164,10 +173,11 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if err != nil {
 		return WorkflowResult{}, err
 	}
+
 	// we can run multiple child workflows in parallel if needed, or steps in parallel using dbos.RunAsStep
 
 	// sending events
-	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_001_FINISHED"})
+	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_1_FINISHED"})
 	if err != nil {
 		return WorkflowResult{}, err
 	}
@@ -187,22 +197,20 @@ func GenericWorkflowStep(ctx context.Context, stepName string) (string, error) {
 	if randNum == 1 {
 		return "", errors.New("simulated error in the step")
 	}
-
 	if params.RunAsQueue {
 		time.Sleep(2 * time.Second)
 	}
-
 	return fmt.Sprintf("%s succeeded", stepName), nil
 }
 
-func FirstWorkflowStep(ctx context.Context) (string, error) {
+func DataCollectionStep(ctx context.Context) (string, error) {
 	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "FirstWorkflowStep")
+	return GenericWorkflowStep(ctx, "DataCollectionStep")
 }
 
-func SecondWorkflowStep(ctx context.Context) (string, error) {
+func EvidencesCollectionStep(ctx context.Context) (string, error) {
 	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "SecondWorkflowStep")
+	return GenericWorkflowStep(ctx, "EvidencesCollectionStep")
 }
 
 func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
@@ -211,14 +219,14 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		urn := query.Get("urn")
 		runAsQueue := query.Get("runAsQueue") == "true"
 		runStepStr := query.Get("runStep")
-		runStep := RUN_STEP_0 // default to run all steps
+		runStep := RUN_STEP_ALL // default to run all steps
 		switch runStepStr {
 		case "0":
-			runStep = RUN_STEP_0
+			runStep = RUN_STEP_ALL
 		case "1":
-			runStep = RUN_STEP_1
+			runStep = RUN_STEP_DATA_COLLECTION
 		case "2":
-			runStep = RUN_STEP_2
+			runStep = RUN_STEP_EVIDENCES_COLLECTION
 		default:
 		}
 
@@ -274,15 +282,26 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		workflowID := r.PathValue("uuid")
 
 		workflowSteps, err := dbosCtx.GetWorkflowSteps(dbosCtx, workflowID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ReRunWorkflowHandler: error retrieving workflow steps %+v\n", err)
+			return
+		}
+
 		stepFailed := uint(0)
 		for _, step := range workflowSteps {
 			if step.Error != nil {
 				stepFailed = uint(step.StepID)
+				if step.StepName == "DBOS.getResult" {
+					stepFailed = max(stepFailed-1, 0) // if the failure is in GetResult step, we want to rerun the workflow from the last step to make sure the workflow can complete successfully
+				}
 				break
 			}
 		}
+		fmt.Printf("ReRunWorkflowHandler: stepFailed %+v\n", stepFailed)
 
-		forkedWorkflowID := uuid.New().String() // new uuid
+		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
+		forkedWorkflowID := IdempotencyKeyAddSuffix(workflowID, fmt.Sprintf("%d", time.Now().Unix()))
 		fmt.Printf("ReRunWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
 		_, err = dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
@@ -360,7 +379,7 @@ func CollectWorkflowResults(queueResultsChan chan WorkflowResult) {
 	for result := range queueResultsChan {
 		tmp := result
 		go func(r WorkflowResult) {
-			fmt.Printf("CollectWorkflowResults: Workflow result: %+v\n", r)
+			fmt.Printf("CollectWorkflowResults: Workflow result: %+v\n", r.ToJSON())
 		}(tmp)
 	}
 }

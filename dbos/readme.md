@@ -34,17 +34,17 @@ curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=true
 
 # This will call the workflow immediately, execute only the second step, and return the outputs from both steps.
 curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=2"
-# {"outputStep1":"","outputStep2":"SecondWorkflowStep succeeded"}
+# {"outputDataCollection":"","outputEvidencesCollection":"SecondWorkflowStep succeeded"}
 
 # This will call the workflow immediately, execute only the first step, and return the outputs from it.
 curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=1"
-# {"outputStep1":"FirstWorkflowStep succeeded","outputStep2":""}
+# {"outputDataCollection":"FirstWorkflowStep succeeded","outputEvidencesCollection":""}
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
 # rerun a workflow
-curl -s -X GET "http://localhost:8585/workflow/rerun/16411325941583066502"
+curl -s -X GET "http://localhost:8585/workflow/rerun/1380518774744939451"
 ```
 
 #### Docs
