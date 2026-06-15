@@ -49,7 +49,7 @@ func NewActivities(taskQueue string) *Activities {
 	}
 }
 
-func (a *Activities) WorkflowStep(ctx context.Context, stepName string, params WorkflowParams) (string, error) {
+func (a *Activities) GenericWorkflowStep(ctx context.Context, stepName string, params WorkflowParams) (string, error) {
 	// inject random failure to test retries
 	randNum := rand.IntN(2) // generates a random number between 0 and 1
 	if randNum == 1 {
@@ -59,11 +59,11 @@ func (a *Activities) WorkflowStep(ctx context.Context, stepName string, params W
 }
 
 func (a *Activities) FirstWorkflowStep(ctx context.Context, params WorkflowParams) (string, error) {
-	return a.WorkflowStep(ctx, "FirstWorkflowStep", params)
+	return a.GenericWorkflowStep(ctx, "FirstWorkflowStep", params)
 }
 
 func (a *Activities) SecondWorkflowStep(ctx context.Context, params WorkflowParams) (string, error) {
-	return a.WorkflowStep(ctx, "SecondWorkflowStep", params)
+	return a.GenericWorkflowStep(ctx, "SecondWorkflowStep", params)
 }
 
 func MainWorkflowChild(ctx workflow.Context, params WorkflowParams) (string, error) {

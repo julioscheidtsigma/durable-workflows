@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -22,7 +23,7 @@ var (
 	retryInterval      = 1 * time.Second
 )
 
-var resultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
+var queueResultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
 var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
 
 const (
@@ -77,6 +78,75 @@ func (p WorkflowParams) GetIdempotencyKey() string {
 	return strconv.FormatUint(hash.Sum64(), 10)
 }
 
+func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResult, error) {
+	fmt.Printf("MainWorkflowChildPhase1 params: %+v\n", params)
+
+	opts := []dbos.StepOption{}
+	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
+	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
+	opts = append(opts, dbos.WithBaseInterval(retryInterval))
+
+	type OutputStep struct {
+		step   int
+		output string
+		err    error
+	}
+	runAllSteps := params.RunStep == RUN_STEP_0
+
+	wg := sync.WaitGroup{}
+	outputsChan := make(chan OutputStep) // channel to collect outputs from steps, will be closed after all steps are done
+
+	// run both steps in parallel
+	if runAllSteps || params.RunStep == RUN_STEP_1 {
+		wg.Go(func() {
+			output, err := dbos.RunAsStep(dbosCtx, FirstWorkflowStep, opts...)
+			if err != nil {
+				fmt.Printf("MainWorkflow: FirstWorkflowStep: error %+v\n", err)
+				outputsChan <- OutputStep{step: RUN_STEP_1, err: err}
+			} else {
+				fmt.Printf("MainWorkflow: FirstWorkflowStep result: %+v\n", output)
+				outputsChan <- OutputStep{step: RUN_STEP_1, output: output}
+			}
+		})
+	}
+
+	if runAllSteps || params.RunStep == RUN_STEP_2 {
+		wg.Go(func() {
+			output, err := dbos.RunAsStep(dbosCtx, SecondWorkflowStep, opts...)
+			if err != nil {
+				fmt.Printf("MainWorkflow: SecondWorkflowStep: error %+v\n", err)
+				outputsChan <- OutputStep{step: RUN_STEP_2, err: err}
+			} else {
+				fmt.Printf("MainWorkflow: SecondWorkflowStep result: %+v\n", output)
+				outputsChan <- OutputStep{step: RUN_STEP_2, output: output}
+			}
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		fmt.Printf("MainWorkflow: all steps done, closing outputsChan\n")
+		close(outputsChan)
+	}()
+
+	// collect outputs from steps
+	results := WorkflowResult{}
+	for output := range outputsChan {
+		if output.err != nil {
+			// if any step failed, return error to trigger workflow retry
+			return WorkflowResult{}, output.err
+		}
+		switch output.step {
+		case RUN_STEP_1:
+			results.OutputStep1 = output.output
+		case RUN_STEP_2:
+			results.OutputStep2 = output.output
+		}
+	}
+
+	return results, nil
+}
+
 func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResult, error) {
 	// workflow id is the same as the idempotency key
 	workflowID, _ := dbosCtx.GetWorkflowID()
@@ -85,71 +155,54 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue("params", params)
 
-	opts := []dbos.StepOption{}
-	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
-	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
-	opts = append(opts, dbos.WithBaseInterval(retryInterval))
-
-	var err error
-	var outputStep1 string
-	var outputStep2 string
-	runAllSteps := params.RunStep == RUN_STEP_0
-
-	if runAllSteps || params.RunStep == RUN_STEP_1 {
-		outputStep1, err = dbos.RunAsStep(dbosCtx, FirstWorkflowStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflow: FirstWorkflowStep: error %+v\n", err)
-			return WorkflowResult{}, err
-		}
-		fmt.Printf("MainWorkflow: FirstWorkflowStep result: %+v\n", outputStep1)
+	// run a child workflow to demonstrate child workflow support
+	handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase1, params)
+	if err != nil {
+		return WorkflowResult{}, err
 	}
-
-	if runAllSteps || params.RunStep == RUN_STEP_2 {
-		outputStep2, err = dbos.RunAsStep(dbosCtx, SecondWorkflowStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflow: SecondWorkflowStep: error %+v\n", err)
-			return WorkflowResult{}, err
-		}
-		fmt.Printf("MainWorkflow: SecondWorkflowStep result: %+v\n", outputStep2)
+	results, err := handle.GetResult()
+	if err != nil {
+		return WorkflowResult{}, err
 	}
+	// we can run multiple child workflows in parallel if needed, or steps in parallel using dbos.RunAsStep
 
 	// sending events
-	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "WORKFLOW_DONE"})
+	err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_001_FINISHED"})
 	if err != nil {
 		return WorkflowResult{}, err
 	}
 
-	results := WorkflowResult{OutputStep1: outputStep1, OutputStep2: outputStep2}
-
 	if params.RunAsQueue {
 		// send results to a channel to be consumed by another goroutine
-		resultsChan <- results
+		queueResultsChan <- results
 	}
 
 	return results, nil
 }
 
-func WorkflowStep(ctx context.Context, stepName string) (string, error) {
+func GenericWorkflowStep(ctx context.Context, stepName string) (string, error) {
 	params := ctx.Value("params").(WorkflowParams)
 	// inject random failure to test retries
 	randNum := rand.IntN(2) // generates a random number between 0 and 1
 	if randNum == 1 {
 		return "", errors.New("simulated error in the step")
 	}
+
 	if params.RunAsQueue {
-		time.Sleep(time.Duration(randNum) * time.Second)
+		time.Sleep(2 * time.Second)
 	}
+
 	return fmt.Sprintf("%s succeeded", stepName), nil
 }
 
 func FirstWorkflowStep(ctx context.Context) (string, error) {
 	// each step output will be stored into dbos.operation_outputs
-	return WorkflowStep(ctx, "FirstWorkflowStep")
+	return GenericWorkflowStep(ctx, "FirstWorkflowStep")
 }
 
 func SecondWorkflowStep(ctx context.Context) (string, error) {
 	// each step output will be stored into dbos.operation_outputs
-	return WorkflowStep(ctx, "SecondWorkflowStep")
+	return GenericWorkflowStep(ctx, "SecondWorkflowStep")
 }
 
 func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
@@ -183,7 +236,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "StartWorkflowHandler: workflow finished with error %+v\n", err)
+				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
 				return
 			}
 
@@ -194,6 +247,12 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		} else {
 			// run a durable workflow and gather results right away
 			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey))
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
+				return
+			}
+
 			output, err := handle.GetResult()
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -269,12 +328,20 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 
 		items := make([]WorkflowItem, 0)
 		for _, w := range workflows {
+			input := ""
+			output := ""
+			if w.Input != nil {
+				input = w.Input.(string)
+			}
+			if w.Output != nil {
+				output = w.Output.(string)
+			}
 			item := WorkflowItem{
 				UUID:          w.ID,
 				Status:        string(w.Status),
 				Name:          w.Name,
-				Input:         w.Input.(string),
-				Output:        w.Output.(string),
+				Input:         input,
+				Output:        output,
 				Attempts:      w.Attempts,
 				Queue:         w.QueueName,
 				Serialization: w.Serialization,
@@ -289,8 +356,8 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 	}
 }
 
-func CollectWorkflowResults(resultsChan chan WorkflowResult) {
-	for result := range resultsChan {
+func CollectWorkflowResults(queueResultsChan chan WorkflowResult) {
+	for result := range queueResultsChan {
 		tmp := result
 		go func(r WorkflowResult) {
 			fmt.Printf("CollectWorkflowResults: Workflow result: %+v\n", r)
@@ -302,7 +369,7 @@ func CollectWorkflowEvents(dbosCtx dbos.DBOSContext, eventsChan chan dbos.Workfl
 	for handle := range eventsChan {
 		tmp := handle
 		go func(h dbos.WorkflowHandle[WorkflowResult]) {
-			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 30*time.Second)
+			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 60*time.Second)
 			if err != nil {
 				return
 			}
@@ -316,7 +383,7 @@ func main() {
 	pass := "local"
 	host := "localhost"
 	port := 5432
-	database := "edd"
+	database := "argus"
 	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", user, pass, host, port, database)
 
 	ctx := context.Background()
@@ -335,6 +402,7 @@ func main() {
 
 	// Register a workflow
 	dbos.RegisterWorkflow(dbosCtx, MainWorkflow)
+	dbos.RegisterWorkflow(dbosCtx, MainWorkflowChildPhase1)
 
 	// Create a queue
 	eddQueue := dbos.NewWorkflowQueue(dbosCtx, QUEUE,
@@ -356,7 +424,7 @@ func main() {
 	// Shutdown gracefully shuts down the DBOS runtime
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
-	go CollectWorkflowResults(resultsChan)
+	go CollectWorkflowResults(queueResultsChan)
 	go CollectWorkflowEvents(dbosCtx, eventsChan)
 
 	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
@@ -372,5 +440,5 @@ func main() {
 	if errListen != nil {
 		fmt.Printf("Error starting server: %s\n", errListen)
 	}
-	close(resultsChan) // only reached when server exits
+	close(queueResultsChan) // only reached when server exits
 }
