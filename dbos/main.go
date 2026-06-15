@@ -24,7 +24,6 @@ var (
 )
 
 var queueResultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
-// var eventsChan = make(chan dbos.WorkflowHandle[WorkflowResult], 100)
 
 const (
 	RUN_STEP_ALL                  int = iota // run all steps
@@ -33,8 +32,7 @@ const (
 )
 
 const (
-	QUEUE        = "edd-queue"
-	EVENT_STATUS = "status"
+	QUEUE = "edd-queue"
 )
 
 type WorkflowParams struct {
@@ -63,9 +61,11 @@ func (wr WorkflowResult) ToJSON() string {
 	return string(apiResponse)
 }
 
-// type WorkflowEvent struct {
-// 	Name string `json:"name"`
-// }
+type OutputStep struct {
+	step   int
+	output string
+	err    error
+}
 
 type WorkflowItem struct {
 	UUID          string    `json:"uuid"`
@@ -88,19 +88,18 @@ func (p WorkflowParams) GetIdempotencyKey() string {
 	return strconv.FormatUint(hash.Sum64(), 10)
 }
 
-func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase1Result, error) {
-	fmt.Printf("MainWorkflowChildPhase1 params: %+v\n", params)
-
+func getStepOpts() []dbos.StepOption {
 	opts := []dbos.StepOption{}
 	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
 	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
 	opts = append(opts, dbos.WithBaseInterval(retryInterval))
+	return opts
+}
 
-	type OutputStep struct {
-		step   int
-		output string
-		err    error
-	}
+func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase1Result, error) {
+	fmt.Printf("MainWorkflowChildPhase1 params: %+v\n", params)
+	opts := getStepOpts()
+
 	runAllSteps := params.RunStep == RUN_STEP_ALL
 
 	wg := sync.WaitGroup{}
@@ -165,17 +164,7 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 
 func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase2Result, error) {
 	fmt.Printf("MainWorkflowChildPhase2 params: %+v\n", params)
-
-	opts := []dbos.StepOption{}
-	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
-	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
-	opts = append(opts, dbos.WithBaseInterval(retryInterval))
-
-	type OutputStep struct {
-		step   int
-		output string
-		err    error
-	}
+	opts := getStepOpts()
 
 	wg := sync.WaitGroup{}
 	outputsChan := make(chan OutputStep) // channel to collect outputs from steps, will be closed after all steps are done
@@ -242,7 +231,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	dbosCtx = dbosCtx.WithValue("params", params)
 
 	// run children workflows to demonstrate child workflow support
-	handlePhase1, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase1, params)
+	handlePhase1, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase1, params, dbos.WithQueue(QUEUE))
 	if err != nil {
 		return WorkflowResult{}, err
 	}
@@ -252,13 +241,8 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-	// // sending events
-	// err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_1_FINISHED"})
-	// if err != nil {
-	// 	return WorkflowResult{}, err
-	// }
 
-	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase2, params)
+	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase2, params, dbos.WithQueue(QUEUE))
 	if err != nil {
 		return WorkflowResult{}, err
 	}
@@ -266,11 +250,6 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResu
 	if err != nil {
 		return WorkflowResult{}, err
 	}
-	// // sending events
-	// err = dbos.SetEvent(dbosCtx, EVENT_STATUS, WorkflowEvent{Name: "PHASE_2_FINISHED"})
-	// if err != nil {
-	// 	return WorkflowResult{}, err
-	// }
 
 	results := WorkflowResult{
 		WorkflowPhase1Result: resultPhase1,
@@ -349,7 +328,6 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
 				return
 			}
-			// eventsChan <- handle
 
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
@@ -368,7 +346,6 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 				fmt.Fprintf(w, "StartWorkflowHandler: workflow finished with error %+v\n", err)
 				return
 			}
-			// eventsChan <- handle
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -399,14 +376,6 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 			fmt.Fprintf(w, "ReRunWorkflowHandler: error re-running workflow %+v\n", err)
 			return
 		}
-
-		// handle, err := dbos.ResumeWorkflow[WorkflowResult](dbosCtx, forkedWorkflowID, dbos.WithResumeQueue(queue.Name))
-		// if err != nil {
-		// 	w.WriteHeader(http.StatusInternalServerError)
-		// 	fmt.Fprintf(w, "ReRunWorkflowHandler: error re-running workflow %+v\n", err)
-		// 	return
-		// }
-		// eventsChan <- handle
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -467,19 +436,6 @@ func CollectWorkflowResults(queueResultsChan chan WorkflowResult) {
 	}
 }
 
-// func CollectWorkflowEvents(dbosCtx dbos.DBOSContext, eventsChan chan dbos.WorkflowHandle[WorkflowResult]) {
-// 	for handle := range eventsChan {
-// 		tmp := handle
-// 		go func(h dbos.WorkflowHandle[WorkflowResult]) {
-// 			e, err := dbos.GetEvent[WorkflowEvent](dbosCtx, h.GetWorkflowID(), EVENT_STATUS, 60*time.Second)
-// 			if err != nil {
-// 				return
-// 			}
-// 			fmt.Printf("CollectWorkflowEvents: Workflow event: %+v\n", e)
-// 		}(tmp)
-// 	}
-// }
-
 func main() {
 	user := "root"
 	pass := "local"
@@ -528,7 +484,6 @@ func main() {
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
 	go CollectWorkflowResults(queueResultsChan)
-	// go CollectWorkflowEvents(dbosCtx, eventsChan)
 
 	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
 	http.HandleFunc("/workflow/start", startWorkflowHandler)
@@ -544,5 +499,4 @@ func main() {
 		fmt.Printf("Error starting server: %s\n", errListen)
 	}
 	close(queueResultsChan) // only reached when server exits
-	// close(eventsChan)
 }
