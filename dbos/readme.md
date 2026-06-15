@@ -3,6 +3,8 @@
 DBOS uses Postgres to store the workflows, steps, inputs/outputs, statuses, queues and so on. The main tables are:
 - dbos.workflow_status
 - dbos.operation_outputs
+- dbos.workflow_events
+- dbos.workflow_events_history
 
 `workflow_status` stores the workflow uuid, name, status, inputs for all workflow, final output, queue used and some other fields.
 The inputs are passed directly to the workflow as a whole, and they can be injected into the context to be accessed inside each step later on.
