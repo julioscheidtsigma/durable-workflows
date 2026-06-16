@@ -30,23 +30,27 @@ go run main.go
 Examples to call the API and execute the workflows:
 
 ```bash
-# This will enqueue the workflow (`runAsQueue=true`), execute all steps (`runStep=0`), and just return the workflow was triggered.
-curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=true&runStep=0"
+# This will enqueue the workflow, execute all steps (`step=0`), and just return the workflow was triggered
+curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&step=0"
 # StartWorkflowHandler: workflow triggered successfully
 
-# This will call the workflow immediately, execute only the second step, and return the outputs from both steps.
-curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=2"
-# {"outputDataCollection":"","outputEvidencesCollection":"SecondWorkflowStep succeeded"}
-
-# This will call the workflow immediately, execute only the first step, and return the outputs from it.
-curl -s -X GET "http://localhost:8585/workflow/start?urn=URN_001&runAsQueue=false&runStep=1"
-# {"outputDataCollection":"FirstWorkflowStep succeeded","outputEvidencesCollection":""}
+# This will enqueue the workflow, and execute only the second step
+curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&step=2"
+# StartWorkflowHandler: workflow triggered successfully
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
-# rerun a workflow
-curl -s -X GET "http://localhost:8585/workflow/rerun/11940812423115777703/0"
+# fork a workflow at specific step
+curl -s -X GET "http://localhost:8585/workflow/fork/60425d1c-d78b-4646-8a3c-e8d8abf33aed/step/0"
+
+# change failure probability
+curl -s -X GET "http://localhost:8585/failure?probability=0.0"
+curl -s -X GET "http://localhost:8585/failure?probability=0.5"
+curl -s -X GET "http://localhost:8585/failure?probability=1.0"
+
+# crash testing
+curl -s -X GET "http://localhost:8585/crash"
 ```
 
 #### Docs
@@ -70,25 +74,39 @@ curl -s -X GET "http://localhost:8585/workflow/rerun/11940812423115777703/0"
 ```sql
 -- query to bring each step executed within the workflow
 WITH recursive recursive_outputs as (
-  select workflow_uuid, child_workflow_id,
-      function_name, decode(output, 'base64') as output,
-      ((string_to_array(child_workflow_id, '-'))[2]::int + 1) as child_global_level,
-      function_id as global_level,
-      0 as local_level,
-      to_timestamp(started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at, to_timestamp(completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
-    from dbos.operation_outputs
-    where workflow_uuid = '?' and function_name <> 'DBOS.setEvent' and function_name <> 'DBOS.getResult'
-  union
-    select o.workflow_uuid, o.child_workflow_id,
-      o.function_name, decode(o.output, 'base64') as output,
-      null as child_global_level,
-      ((string_to_array(o.workflow_uuid, '-'))[2]::int + 1) as global_level,
-      o.function_id as local_level,
-      to_timestamp(o.started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at,
-      to_timestamp(o.completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
-    from dbos.operation_outputs o
-    join recursive_outputs ro on ro.child_workflow_id = o.workflow_uuid
-    where o.function_name <> 'DBOS.setEvent' and o.function_name <> 'DBOS.getResult'
+  select oo.workflow_uuid,
+    oo.child_workflow_id,
+    oo.function_name,
+    -- oo.error,
+    decode(oo.output, 'base64') as output,
+    decode(ws.inputs, 'base64') as inputs,
+    ((string_to_array(oo.child_workflow_id, '-'))[2]::int + 1) as child_global_level,
+    oo.function_id as global_level,
+    0 as local_level,
+    to_timestamp(oo.started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at,
+    to_timestamp(oo.completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
+  from dbos.operation_outputs oo
+  join dbos.workflow_status ws on ws.workflow_uuid = oo.workflow_uuid
+  where oo.function_name <> 'DBOS.setEvent' and
+    oo.function_name <> 'DBOS.getResult' and
+    oo.workflow_uuid = '3e48e041-5383-486c-88cd-5236a3033442'
+union
+  select o.workflow_uuid,
+    o.child_workflow_id,
+    o.function_name,
+    -- o.error,
+    decode(o.output, 'base64') as output,
+    decode(ws.inputs, 'base64') as inputs,
+    null as child_global_level,
+    ((string_to_array(o.workflow_uuid, '-'))[2]::int + 1) as global_level,
+    o.function_id as local_level,
+    to_timestamp(o.started_at_epoch_ms/1000.0) at time zone 'UTC' as started_at,
+    to_timestamp(o.completed_at_epoch_ms/1000.0) at time zone 'UTC' as completed_at
+  from dbos.operation_outputs o
+  join dbos.workflow_status ws on ws.workflow_uuid = o.workflow_uuid
+  join recursive_outputs ro on ro.child_workflow_id = o.workflow_uuid
+  where o.function_name <> 'DBOS.setEvent' and
+    o.function_name <> 'DBOS.getResult'
 )
 select *
 from recursive_outputs
@@ -100,7 +118,7 @@ SELECT dbos.enqueue_workflow(
     workflow_name => 'main.MainWorkflow',
     queue_name => 'edd-queue',
     positional_args => ARRAY[
-        CAST('{"urn":"URN_001","runAsQueue":true,"runStep":1}' AS json)
+        CAST('{"name":"Donald Trump","step":0}' AS json)
     ],
     workflow_id => '?',
     priority => 1

@@ -3,68 +3,29 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
+	"github.com/julioscheidtsigma/dbos/requests"
+	"github.com/julioscheidtsigma/dbos/responses"
+	"github.com/julioscheidtsigma/dbos/steps"
+	"github.com/julioscheidtsigma/dbos/utils"
+	"github.com/julioscheidtsigma/dbos/workflows"
+)
+
+const (
+	USE_WORKFLOW_CHILDREN = true
 )
 
 var (
-	retryLimit         = 5
-	retryBackoffFactor = 2.0
-	retryInterval      = 1 * time.Second
+	queueWorkerConcurrency = 10
+	queueRateLimiterLimit  = 100
 )
-
-var queueResultsChan = make(chan WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
-
-const (
-	RUN_STEP_ALL                  int = iota // run all steps
-	RUN_STEP_DATA_COLLECTION                 // run only step 1
-	RUN_STEP_EVIDENCES_COLLECTION            // run only step 2
-)
-
-const (
-	QUEUE = "edd-queue"
-)
-
-type WorkflowParams struct {
-	URN        string `json:"urn"`
-	RunAsQueue bool   `json:"runAsQueue"`
-	RunStep    int    `json:"runStep"` // optional param to control which step to run, default is 0 which means run all steps
-}
-
-type WorkflowPhase1Result struct {
-	OutputDataCollection      string `json:"outputDataCollection"`
-	OutputEvidencesCollection string `json:"outputEvidencesCollection"`
-}
-
-type WorkflowPhase2Result struct {
-	OutputPepModule       string `json:"outputPepModule"`
-	OutputSanctionsModule string `json:"outputSanctionsModule"`
-}
-
-type WorkflowResult struct {
-	WorkflowPhase1Result
-	WorkflowPhase2Result
-}
-
-func (wr WorkflowResult) ToJSON() string {
-	apiResponse, _ := json.Marshal(wr)
-	return string(apiResponse)
-}
-
-type OutputStep struct {
-	step   int
-	output string
-	err    error
-}
 
 type WorkflowItem struct {
 	UUID          string    `json:"uuid"`
@@ -79,239 +40,83 @@ type WorkflowItem struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
-func (p WorkflowParams) GetIdempotencyKey() string {
-	hash := xxhash.New()
-	_, _ = hash.WriteString(p.URN)
-	_, _ = hash.WriteString(strconv.FormatBool(p.RunAsQueue))
-	_, _ = hash.WriteString(strconv.Itoa(int(p.RunStep)))
-	return strconv.FormatUint(hash.Sum64(), 10)
-}
-
-func getStepOpts() []dbos.StepOption {
-	opts := []dbos.StepOption{}
-	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
-	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
-	opts = append(opts, dbos.WithBaseInterval(retryInterval))
-	return opts
-}
-
-func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase1Result, error) {
-	fmt.Printf("MainWorkflowChildPhase1 params: %+v\n", params)
-	opts := getStepOpts()
-	results := &WorkflowPhase1Result{}
-	runAllSteps := params.RunStep == RUN_STEP_ALL
-
-	// run both steps in parallel
-	if runAllSteps || params.RunStep == RUN_STEP_DATA_COLLECTION {
-		output, err := dbos.RunAsStep(dbosCtx, DataCollectionStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep: error %+v\n", err)
-		} else {
-			fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep result: %+v\n", output)
-			results.OutputDataCollection = output
-		}
+func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
+	input := ""
+	output := ""
+	if ws.Input != nil {
+		input = ws.Input.(string)
 	}
-
-	if runAllSteps || params.RunStep == RUN_STEP_EVIDENCES_COLLECTION {
-		output, err := dbos.RunAsStep(dbosCtx, EvidencesCollectionStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep: error %+v\n", err)
-		} else {
-			fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep result: %+v\n", output)
-			results.OutputEvidencesCollection = output
-		}
+	if ws.Output != nil {
+		output = ws.Output.(string)
 	}
-	fmt.Printf("MainWorkflowChildPhase1: results %+v\n", results)
-
-	if params.RunAsQueue {
-		time.Sleep(15 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
+	return WorkflowItem{
+		UUID:          ws.ID,
+		Status:        string(ws.Status),
+		Name:          ws.Name,
+		Input:         input,
+		Output:        output,
+		Attempts:      ws.Attempts,
+		Queue:         ws.QueueName,
+		Serialization: ws.Serialization,
+		StartedAt:     ws.StartedAt,
+		CreatedAt:     ws.CreatedAt,
 	}
-
-	return *results, nil
-}
-
-func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase2Result, error) {
-	fmt.Printf("MainWorkflowChildPhase2 params: %+v\n", params)
-	opts := getStepOpts()
-	results := &WorkflowPhase2Result{}
-
-	// run both steps in parallel
-	output, err := dbos.RunAsStep(dbosCtx, PepModuleStep, opts...)
-	if err != nil {
-		fmt.Printf("MainWorkflowChildPhase2: PepModuleStep: error %+v\n", err)
-	} else {
-		fmt.Printf("MainWorkflowChildPhase2: PepModuleStep result: %+v\n", output)
-		results.OutputPepModule = output
-	}
-
-	output, err = dbos.RunAsStep(dbosCtx, SanctionsModuleStep, opts...)
-	if err != nil {
-		fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep: error %+v\n", err)
-	} else {
-		fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep result: %+v\n", output)
-		results.OutputSanctionsModule = output
-	}
-	fmt.Printf("MainWorkflowChildPhase2: results %+v\n", results)
-
-	if params.RunAsQueue {
-		time.Sleep(30 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
-	}
-
-	return *results, nil
-}
-
-func MainWorkflow(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowResult, error) {
-	// workflow id is the same as the idempotency key
-	workflowID, _ := dbosCtx.GetWorkflowID()
-	fmt.Printf("MainWorkflow: workflowID %+v\n", workflowID)
-
-	// inject params into the context so that steps can access it
-	dbosCtx = dbosCtx.WithValue("params", params)
-
-	// run children workflows to demonstrate child workflow support
-	handlePhase1, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase1, params, dbos.WithQueue(QUEUE))
-	if err != nil {
-		return WorkflowResult{}, err
-	}
-	// here we are calling the results right after starting the phase,
-	// to simulate dependencies between phases
-	resultPhase1, err := handlePhase1.GetResult()
-	if err != nil {
-		return WorkflowResult{}, err
-	}
-
-	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowChildPhase2, params, dbos.WithQueue(QUEUE))
-	if err != nil {
-		return WorkflowResult{}, err
-	}
-	resultPhase2, err := handlePhase2.GetResult()
-	if err != nil {
-		return WorkflowResult{}, err
-	}
-
-	results := WorkflowResult{
-		WorkflowPhase1Result: resultPhase1,
-		WorkflowPhase2Result: resultPhase2,
-	}
-
-	if params.RunAsQueue {
-		// send results to a channel to be consumed by another goroutine
-		queueResultsChan <- results
-	}
-
-	return results, nil
-}
-
-func GenericWorkflowStep(ctx context.Context, stepName string) (string, error) {
-	// params := ctx.Value("params").(WorkflowParams)
-	// inject random failure to test retries
-	randNum := rand.IntN(2) // generates a random number between 0 and 1
-	if randNum == 1 {
-		return "", errors.New("simulated error in the step")
-	}
-	return fmt.Sprintf("%s succeeded", stepName), nil
-}
-
-func DataCollectionStep(ctx context.Context) (string, error) {
-	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "DataCollectionStep")
-}
-
-func EvidencesCollectionStep(ctx context.Context) (string, error) {
-	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "EvidencesCollectionStep")
-}
-
-func PepModuleStep(ctx context.Context) (string, error) {
-	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "PepModuleStep")
-}
-
-func SanctionsModuleStep(ctx context.Context) (string, error) {
-	// each step output will be stored into dbos.operation_outputs
-	return GenericWorkflowStep(ctx, "SanctionsModuleStep")
 }
 
 func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		urn := query.Get("urn")
-		runAsQueue := query.Get("runAsQueue") == "true"
-		runStepStr := query.Get("runStep")
-		runStep := RUN_STEP_ALL // default to run all steps
-		switch runStepStr {
-		case "0":
-			runStep = RUN_STEP_ALL
-		case "1":
-			runStep = RUN_STEP_DATA_COLLECTION
-		case "2":
-			runStep = RUN_STEP_EVIDENCES_COLLECTION
-		default:
-		}
+		name := query.Get("name")
+		step := steps.ParseStepFromQuery(query.Get("step"))
+		fmt.Printf("StartWorkflowHandler: step %+v\n", step)
 
-		params := WorkflowParams{
-			URN:        urn,
-			RunAsQueue: runAsQueue,
-			RunStep:    runStep,
+		params := requests.WorkflowParams{
+			Name: name,
+			Step: step,
 		}
-
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
-		idempotencyKey := params.GetIdempotencyKey()
-		fmt.Printf("StartWorkflowHandler: idempotencyKey %+v\n", idempotencyKey)
+		// workflowID := params.IdempotencyKey()
+		workflowID := uuid.New().String()
+		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
 
-		if params.RunAsQueue {
-			_, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey), dbos.WithQueue(queue.Name))
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
+		var err error
+		if USE_WORKFLOW_CHILDREN {
+			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflowChildren, params,
+				dbos.WithWorkflowID(workflowID), dbos.WithQueue(queue.Name))
 		} else {
-			// run a durable workflow and gather results right away
-			handle, err := dbos.RunWorkflow(dbosCtx, MainWorkflow, params, dbos.WithWorkflowID(idempotencyKey))
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
-				return
-			}
-
-			output, err := handle.GetResult()
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "StartWorkflowHandler: workflow finished with error %+v\n", err)
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, output.ToJSON())
+			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params,
+				dbos.WithWorkflowID(workflowID), dbos.WithQueue(queue.Name))
 		}
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
 	}
 }
 
-func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workflowID := r.PathValue("uuid")
-		stepStr := r.PathValue("step")
-		step, _ := strconv.ParseUint(stepStr, 10, 64)
-		fmt.Printf("ReRunWorkflowHandler: step %+v\n", step)
+		step, _ := strconv.ParseUint(r.PathValue("step"), 10, 64)
+		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
 
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		forkedWorkflowID := uuid.New().String()
-		fmt.Printf("ReRunWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
+		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
 		handle, err := dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
 			OriginalWorkflowID: workflowID,
 			ForkedWorkflowID:   forkedWorkflowID,
-			QueueName:          queue.Name,
+			QueueName:          workflows.QUEUE,
 			StartStep:          uint(step),
 		})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "ReRunWorkflowHandler: error re-running workflow %+v\n", err)
+			fmt.Fprintf(w, "ForkWorkflowHandler: error re-running workflow %+v\n", err)
 			return
 		}
 
@@ -325,7 +130,8 @@ func ReRunWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 
 func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		workflows, err := dbos.ListWorkflows(dbosCtx, dbos.WithQueueName(QUEUE))
+		workflows, err := dbos.ListWorkflows(dbosCtx, dbos.WithQueueName(workflows.QUEUE),
+			dbos.WithLoadInput(true), dbos.WithLoadOutput(true))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "ListWorkflowsHandler: error listing workflows %+v\n", err)
@@ -336,28 +142,8 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		w.WriteHeader(http.StatusOK)
 
 		items := make([]WorkflowItem, 0)
-		for _, w := range workflows {
-			input := ""
-			output := ""
-			if w.Input != nil {
-				input = w.Input.(string)
-			}
-			if w.Output != nil {
-				output = w.Output.(string)
-			}
-			item := WorkflowItem{
-				UUID:          w.ID,
-				Status:        string(w.Status),
-				Name:          w.Name,
-				Input:         input,
-				Output:        output,
-				Attempts:      w.Attempts,
-				Queue:         w.QueueName,
-				Serialization: w.Serialization,
-				StartedAt:     w.StartedAt,
-				CreatedAt:     w.CreatedAt,
-			}
-			items = append(items, item)
+		for _, ws := range workflows {
+			items = append(items, WorkflowItemFromStatus(ws))
 		}
 
 		apiResponse, _ := json.Marshal(items)
@@ -365,10 +151,33 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 	}
 }
 
-func CollectWorkflowResults(queueResultsChan chan WorkflowResult) {
-	for result := range queueResultsChan {
+func ChangeFailureProbabilityHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		probStr := query.Get("probability")
+		prob, err := strconv.ParseFloat(probStr, 64)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "ChangeFailureProbabilityHandler: invalid probability value %+v\n", probStr)
+			return
+		}
+		utils.ChangeFailureProbability(prob)
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "ChangeFailureProbabilityHandler: failure probability changed to %+v\n", prob)
+	}
+}
+
+func CrashHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		os.Exit(1)
+	}
+}
+
+func CollectWorkflowResults(resultsChan chan responses.WorkflowResult) {
+	for result := range resultsChan {
 		tmp := result
-		go func(r WorkflowResult) {
+		go func(r responses.WorkflowResult) {
 			fmt.Printf("CollectWorkflowResults: Workflow result: %+v\n", r.ToJSON())
 		}(tmp)
 	}
@@ -396,17 +205,18 @@ func main() {
 		fmt.Printf("Error creating DBOS: %s\n", err)
 	}
 
-	// Register a workflow
-	dbos.RegisterWorkflow(dbosCtx, MainWorkflow)
-	dbos.RegisterWorkflow(dbosCtx, MainWorkflowChildPhase1)
-	dbos.RegisterWorkflow(dbosCtx, MainWorkflowChildPhase2)
+	// Register workflows
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow)
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren)
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1)
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2)
 
 	// Create a queue
-	eddQueue := dbos.NewWorkflowQueue(dbosCtx, QUEUE,
-		dbos.WithWorkerConcurrency(10), // set the number of concurrent workers processing the queue
+	eddQueue := dbos.NewWorkflowQueue(dbosCtx, workflows.QUEUE,
+		dbos.WithWorkerConcurrency(queueWorkerConcurrency),
 		dbos.WithRateLimiter(&dbos.RateLimiter{
-			Limit:  100,
-			Period: 60 * time.Second, // 100 workflows per minute
+			Limit:  queueRateLimiterLimit,
+			Period: 60 * time.Second,
 		}),
 		dbos.WithPriorityEnabled(),
 		dbos.WithQueueBasePollingInterval(1*time.Second),
@@ -421,20 +231,26 @@ func main() {
 	// Shutdown gracefully shuts down the DBOS runtime
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
-	go CollectWorkflowResults(queueResultsChan)
+	go CollectWorkflowResults(workflows.QueueResultsChan)
 
 	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
 	http.HandleFunc("/workflow/start", startWorkflowHandler)
 
-	rerunWorkflowHandler := ReRunWorkflowHandler(dbosCtx, eddQueue)
-	http.HandleFunc("/workflow/rerun/{uuid}/{step}", rerunWorkflowHandler)
+	forkWorkflowHandler := ForkWorkflowHandler(dbosCtx, eddQueue)
+	http.HandleFunc("/workflow/fork/{uuid}/step/{step}", forkWorkflowHandler)
 
 	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, eddQueue)
 	http.HandleFunc("/workflow", listWorkflowsHandler)
+
+	changeFailureProbabilityHandler := ChangeFailureProbabilityHandler()
+	http.HandleFunc("/failure", changeFailureProbabilityHandler)
+
+	crashHandler := CrashHandler()
+	http.HandleFunc("/crash", crashHandler)
 
 	errListen := http.ListenAndServe(":8585", nil)
 	if errListen != nil {
 		fmt.Printf("Error starting server: %s\n", errListen)
 	}
-	close(queueResultsChan) // only reached when server exits
+	close(workflows.QueueResultsChan) // only reached when server exits
 }

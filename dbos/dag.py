@@ -46,17 +46,17 @@ def get_detailed_levels(graph):
 
 if __name__ in '__main__':
   dag = {
-    'main.MainWorkflow': ['main.MainWorkflowChildPhase1'],
-    'main.MainWorkflowChildPhase1': ['main.DataCollectionStep', 'main.EvidencesCollectionStep'],
-    'main.DataCollectionStep': ['main.MainWorkflowChildPhase2'],
-    'main.EvidencesCollectionStep': ['main.MainWorkflowChildPhase2'],
-    'main.MainWorkflowChildPhase2': ['main.PepModuleStep', 'main.SanctionsModuleStep'],
+    'main.MainWorkflow': ['main.MainWorkflowPhase1'],
+    'main.MainWorkflowPhase1': ['main.DataCollectionStep', 'main.EvidencesCollectionStep'],
+    'main.DataCollectionStep': ['main.MainWorkflowPhase2'],
+    'main.EvidencesCollectionStep': ['main.MainWorkflowPhase2'],
+    'main.MainWorkflowPhase2': ['main.PepModuleStep', 'main.SanctionsModuleStep'],
     'main.PepModuleStep': [],
     'main.SanctionsModuleStep': [],
   }
   level_structure = get_detailed_levels(dag)
   print(json.dumps(level_structure, indent=2))
-  
+
 """
 {
   "Level 0": [
@@ -64,13 +64,13 @@ if __name__ in '__main__':
       "node": "main.MainWorkflow",
       "parents": [],
       "children": [
-        "main.MainWorkflowChildPhase1"
+        "main.MainWorkflowPhase1"
       ]
     }
   ],
   "Level 1": [
     {
-      "node": "main.MainWorkflowChildPhase1",
+      "node": "main.MainWorkflowPhase1",
       "parents": [
         "main.MainWorkflow"
       ],
@@ -84,25 +84,25 @@ if __name__ in '__main__':
     {
       "node": "main.DataCollectionStep",
       "parents": [
-        "main.MainWorkflowChildPhase1"
+        "main.MainWorkflowPhase1"
       ],
       "children": [
-        "main.MainWorkflowChildPhase2"
+        "main.MainWorkflowPhase2"
       ]
     },
     {
       "node": "main.EvidencesCollectionStep",
       "parents": [
-        "main.MainWorkflowChildPhase1"
+        "main.MainWorkflowPhase1"
       ],
       "children": [
-        "main.MainWorkflowChildPhase2"
+        "main.MainWorkflowPhase2"
       ]
     }
   ],
   "Level 3": [
     {
-      "node": "main.MainWorkflowChildPhase2",
+      "node": "main.MainWorkflowPhase2",
       "parents": [
         "main.DataCollectionStep",
         "main.EvidencesCollectionStep"
@@ -117,14 +117,14 @@ if __name__ in '__main__':
     {
       "node": "main.PepModuleStep",
       "parents": [
-        "main.MainWorkflowChildPhase2"
+        "main.MainWorkflowPhase2"
       ],
       "children": []
     },
     {
       "node": "main.SanctionsModuleStep",
       "parents": [
-        "main.MainWorkflowChildPhase2"
+        "main.MainWorkflowPhase2"
       ],
       "children": []
     }
