@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -99,64 +98,33 @@ func getStepOpts() []dbos.StepOption {
 func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase1Result, error) {
 	fmt.Printf("MainWorkflowChildPhase1 params: %+v\n", params)
 	opts := getStepOpts()
-
+	results := &WorkflowPhase1Result{}
 	runAllSteps := params.RunStep == RUN_STEP_ALL
-
-	wg := sync.WaitGroup{}
-	outputsChan := make(chan OutputStep) // channel to collect outputs from steps, will be closed after all steps are done
 
 	// run both steps in parallel
 	if runAllSteps || params.RunStep == RUN_STEP_DATA_COLLECTION {
-		wg.Go(func() {
-			output, err := dbos.RunAsStep(dbosCtx, DataCollectionStep, opts...)
-			if err != nil {
-				fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep: error %+v\n", err)
-				outputsChan <- OutputStep{step: RUN_STEP_DATA_COLLECTION, err: err}
-			} else {
-				fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep result: %+v\n", output)
-				outputsChan <- OutputStep{step: RUN_STEP_DATA_COLLECTION, output: output}
-			}
-		})
+		output, err := dbos.RunAsStep(dbosCtx, DataCollectionStep, opts...)
+		if err != nil {
+			fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep: error %+v\n", err)
+		} else {
+			fmt.Printf("MainWorkflowChildPhase1: DataCollectionStep result: %+v\n", output)
+			results.OutputDataCollection = output
+		}
 	}
 
 	if runAllSteps || params.RunStep == RUN_STEP_EVIDENCES_COLLECTION {
-		wg.Go(func() {
-			output, err := dbos.RunAsStep(dbosCtx, EvidencesCollectionStep, opts...)
-			if err != nil {
-				fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep: error %+v\n", err)
-				outputsChan <- OutputStep{step: RUN_STEP_EVIDENCES_COLLECTION, err: err}
-			} else {
-				fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep result: %+v\n", output)
-				outputsChan <- OutputStep{step: RUN_STEP_EVIDENCES_COLLECTION, output: output}
-			}
-		})
+		output, err := dbos.RunAsStep(dbosCtx, EvidencesCollectionStep, opts...)
+		if err != nil {
+			fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep: error %+v\n", err)
+		} else {
+			fmt.Printf("MainWorkflowChildPhase1: EvidencesCollectionStep result: %+v\n", output)
+			results.OutputEvidencesCollection = output
+		}
 	}
+	fmt.Printf("MainWorkflowChildPhase1: results %+v\n", results)
 
 	if params.RunAsQueue {
 		time.Sleep(15 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
-	}
-
-	go func() {
-		wg.Wait()
-		fmt.Printf("MainWorkflowChildPhase1: all steps done, closing outputsChan\n")
-		close(outputsChan)
-	}()
-
-	// collect outputs from steps
-	results := &WorkflowPhase1Result{}
-	for output := range outputsChan {
-		if output.err != nil {
-			// if any step failed, return error to trigger workflow retry
-			return WorkflowPhase1Result{}, output.err
-		}
-		fmt.Printf("MainWorkflowChildPhase1: output.step %+v\n", output.step)
-		switch output.step {
-		case RUN_STEP_DATA_COLLECTION:
-			results.OutputDataCollection = output.output
-		case RUN_STEP_EVIDENCES_COLLECTION:
-			results.OutputEvidencesCollection = output.output
-		default:
-		}
 	}
 
 	return *results, nil
@@ -165,58 +133,28 @@ func MainWorkflowChildPhase1(dbosCtx dbos.DBOSContext, params WorkflowParams) (W
 func MainWorkflowChildPhase2(dbosCtx dbos.DBOSContext, params WorkflowParams) (WorkflowPhase2Result, error) {
 	fmt.Printf("MainWorkflowChildPhase2 params: %+v\n", params)
 	opts := getStepOpts()
-
-	wg := sync.WaitGroup{}
-	outputsChan := make(chan OutputStep) // channel to collect outputs from steps, will be closed after all steps are done
+	results := &WorkflowPhase2Result{}
 
 	// run both steps in parallel
-	wg.Go(func() {
-		output, err := dbos.RunAsStep(dbosCtx, PepModuleStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflowChildPhase2: PepModuleStep: error %+v\n", err)
-			outputsChan <- OutputStep{step: 1, err: err}
-		} else {
-			fmt.Printf("MainWorkflowChildPhase2: PepModuleStep result: %+v\n", output)
-			outputsChan <- OutputStep{step: 1, output: output}
-		}
-	})
+	output, err := dbos.RunAsStep(dbosCtx, PepModuleStep, opts...)
+	if err != nil {
+		fmt.Printf("MainWorkflowChildPhase2: PepModuleStep: error %+v\n", err)
+	} else {
+		fmt.Printf("MainWorkflowChildPhase2: PepModuleStep result: %+v\n", output)
+		results.OutputPepModule = output
+	}
 
-	wg.Go(func() {
-		output, err := dbos.RunAsStep(dbosCtx, SanctionsModuleStep, opts...)
-		if err != nil {
-			fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep: error %+v\n", err)
-			outputsChan <- OutputStep{step: 2, err: err}
-		} else {
-			fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep result: %+v\n", output)
-			outputsChan <- OutputStep{step: 2, output: output}
-		}
-	})
+	output, err = dbos.RunAsStep(dbosCtx, SanctionsModuleStep, opts...)
+	if err != nil {
+		fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep: error %+v\n", err)
+	} else {
+		fmt.Printf("MainWorkflowChildPhase2: SanctionsModuleStep result: %+v\n", output)
+		results.OutputSanctionsModule = output
+	}
+	fmt.Printf("MainWorkflowChildPhase2: results %+v\n", results)
 
 	if params.RunAsQueue {
 		time.Sleep(30 * time.Second) // simulate some delay before starting the steps, can be removed in real implementation
-	}
-
-	go func() {
-		wg.Wait()
-		fmt.Printf("MainWorkflowChildPhase2: all steps done, closing outputsChan\n")
-		close(outputsChan)
-	}()
-
-	// collect outputs from steps
-	results := &WorkflowPhase2Result{}
-	for output := range outputsChan {
-		if output.err != nil {
-			// if any step failed, return error to trigger workflow retry
-			return WorkflowPhase2Result{}, output.err
-		}
-		fmt.Printf("MainWorkflowChildPhase2: output.step %+v\n", output.step)
-		switch output.step {
-		case 1:
-			results.OutputPepModule = output.output
-		case 2:
-			results.OutputSanctionsModule = output.output
-		default:
-		}
 	}
 
 	return *results, nil
