@@ -42,7 +42,7 @@ curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&step=2"
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific step
-curl -s -X GET "http://localhost:8585/workflow/fork/ab96bb72-0731-4066-9d24-6d10a2c22ae0/start/3?name=Donald%20J.%20Trump&step=0"
+curl -s -X GET "http://localhost:8585/workflow/fork/848b3506-9fea-4ec3-aeb1-742deb8faae4/start/3?name=Donald%20J.%20Trump&step=0"
 
 # change failure probability
 curl -s -X GET "http://localhost:8585/failure?probability=0.0"
