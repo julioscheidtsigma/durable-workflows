@@ -9,6 +9,10 @@ import (
 	"github.com/julioscheidtsigma/dbos/utils"
 )
 
+const (
+	SKIPPED_STEP = "SKIPPED"
+)
+
 func ParseStepFromQuery(stepStr string) constants.Step {
 	step := constants.RUN_STEP_ALL // default to run all steps
 	switch stepStr {
@@ -42,26 +46,38 @@ func PlaceholderStep(ctx context.Context) (any, error) {
 
 // phase 1
 func DataCollectionStep(ctx context.Context) (string, error) {
+	dataCollectionEnabled := ctx.Value("dataCollectionEnabled").(bool)
+	if !dataCollectionEnabled {
+		return SKIPPED_STEP, nil
+	}
 	paramsPhase1 := ctx.Value("paramsPhase1").(requests.WorkflowParamsPhase1)
-	// fmt.Printf("DataCollectionStep paramsPhase1: %+v\n", paramsPhase1)
 	return GenericWorkflowStep(ctx, "DataCollectionStep - Name: \""+paramsPhase1.Name+"\"")
 }
 
 func EvidencesCollectionStep(ctx context.Context) (string, error) {
+	evidencesCollectionEnabled := ctx.Value("evidencesCollectionEnabled").(bool)
+	if !evidencesCollectionEnabled {
+		return SKIPPED_STEP, nil
+	}
 	paramsPhase1 := ctx.Value("paramsPhase1").(requests.WorkflowParamsPhase1)
-	// fmt.Printf("EvidencesCollectionStep paramsPhase1: %+v\n", paramsPhase1)
 	return GenericWorkflowStep(ctx, "EvidencesCollectionStep - Name: \""+paramsPhase1.Name+"\"")
 }
 
 // phase 2
 func PepModuleStep(ctx context.Context) (string, error) {
+	pepModuleEnabled := ctx.Value("pepModuleEnabled").(bool)
+	if !pepModuleEnabled {
+		return SKIPPED_STEP, nil
+	}
 	paramsPhase2 := ctx.Value("paramsPhase2").(requests.WorkflowParamsPhase2)
-	// fmt.Printf("PepModuleStep paramsPhase2: %+v\n", paramsPhase2)
 	return GenericWorkflowStep(ctx, "PepModuleStep - Name: \""+paramsPhase2.Name+"\"")
 }
 
 func SanctionsModuleStep(ctx context.Context) (string, error) {
+	sanctionsModuleEnabled := ctx.Value("sanctionsModuleEnabled").(bool)
+	if !sanctionsModuleEnabled {
+		return SKIPPED_STEP, nil
+	}
 	paramsPhase2 := ctx.Value("paramsPhase2").(requests.WorkflowParamsPhase2)
-	// fmt.Printf("SanctionsModuleStep paramsPhase2: %+v\n", paramsPhase2)
 	return GenericWorkflowStep(ctx, "SanctionsModuleStep - Name: \""+paramsPhase2.Name+"\"")
 }

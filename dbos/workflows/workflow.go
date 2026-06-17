@@ -138,32 +138,28 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 	opts := utils.GetStepOpts()
 
 	runAllSteps := paramsPhase1.Step.RunAllSteps()
+	dbosCtx = dbosCtx.WithValue("dataCollectionEnabled", runAllSteps || paramsPhase1.Step == constants.RUN_STEP_DATA_COLLECTION)
+	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAllSteps || paramsPhase1.Step == constants.RUN_STEP_EVIDENCES_COLLECTION)
 	results := &responses.WorkflowResultPhase1{}
 
-	// run both steps in parallel
-	if runAllSteps || paramsPhase1.Step == constants.RUN_STEP_DATA_COLLECTION {
-		opts1 := opts
-		opts1 = append(opts1, dbos.WithStepName("DataCollectionStep"))
-		output, err := dbos.RunAsStep(dbosCtx, steps.DataCollectionStep, opts1...)
-		if err != nil {
-			fmt.Printf("MainWorkflowPhase1: DataCollectionStep: error %+v\n", err)
-			return responses.WorkflowResultPhase1{}, err
-		}
-		fmt.Printf("MainWorkflowPhase1: DataCollectionStep result: %+v\n", output)
-		results.OutputDataCollection = output
+	opts1 := opts
+	opts1 = append(opts1, dbos.WithStepName("DataCollectionStep"))
+	output1, err := dbos.RunAsStep(dbosCtx, steps.DataCollectionStep, opts1...)
+	if err != nil {
+		fmt.Printf("MainWorkflowPhase1: DataCollectionStep: error %+v\n", err)
+		return responses.WorkflowResultPhase1{}, err
 	}
+	results.OutputDataCollection = output1
 
-	if runAllSteps || paramsPhase1.Step == constants.RUN_STEP_EVIDENCES_COLLECTION {
-		opts2 := opts
-		opts2 = append(opts2, dbos.WithStepName("EvidencesCollectionStep"))
-		output, err := dbos.RunAsStep(dbosCtx, steps.EvidencesCollectionStep, opts2...)
-		if err != nil {
-			fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep: error %+v\n", err)
-			return responses.WorkflowResultPhase1{}, err
-		}
-		fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep result: %+v\n", output)
-		results.OutputEvidencesCollection = output
+	opts2 := opts
+	opts2 = append(opts2, dbos.WithStepName("EvidencesCollectionStep"))
+	output2, err := dbos.RunAsStep(dbosCtx, steps.EvidencesCollectionStep, opts2...)
+	if err != nil {
+		fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep: error %+v\n", err)
+		return responses.WorkflowResultPhase1{}, err
 	}
+	results.OutputEvidencesCollection = output2
+
 	fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
 
 	return *results, nil
@@ -177,32 +173,28 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, paramsPhase2 requests.Workflow
 	opts := utils.GetStepOpts()
 
 	runAllSteps := paramsPhase2.Step.RunAllSteps()
+	dbosCtx = dbosCtx.WithValue("pepModuleEnabled", runAllSteps || paramsPhase2.Step == constants.RUN_STEP_PEP_MODULE)
+	dbosCtx = dbosCtx.WithValue("sanctionsModuleEnabled", runAllSteps || paramsPhase2.Step == constants.RUN_STEP_SANCTIONS_MODULE)
 	results := &responses.WorkflowResultPhase2{}
 
-	// run both steps in parallel
-	if runAllSteps || paramsPhase2.Step == constants.RUN_STEP_PEP_MODULE {
-		opts1 := opts
-		opts1 = append(opts1, dbos.WithStepName("PepModuleStep"))
-		output, err := dbos.RunAsStep(dbosCtx, steps.PepModuleStep, opts1...)
-		if err != nil {
-			fmt.Printf("MainWorkflow: PepModuleStep: error %+v\n", err)
-			return responses.WorkflowResultPhase2{}, err
-		}
-		fmt.Printf("MainWorkflow: PepModuleStep result: %+v\n", output)
-		results.OutputPepModule = output
+	opts1 := opts
+	opts1 = append(opts1, dbos.WithStepName("PepModuleStep"))
+	output1, err := dbos.RunAsStep(dbosCtx, steps.PepModuleStep, opts1...)
+	if err != nil {
+		fmt.Printf("MainWorkflow: PepModuleStep: error %+v\n", err)
+		return responses.WorkflowResultPhase2{}, err
 	}
+	results.OutputPepModule = output1
 
-	if runAllSteps || paramsPhase2.Step == constants.RUN_STEP_SANCTIONS_MODULE {
-		opts2 := opts
-		opts2 = append(opts2, dbos.WithStepName("SanctionsModuleStep"))
-		output, err := dbos.RunAsStep(dbosCtx, steps.SanctionsModuleStep, opts2...)
-		if err != nil {
-			fmt.Printf("MainWorkflow: SanctionsModuleStep: error %+v\n", err)
-			return responses.WorkflowResultPhase2{}, err
-		}
-		fmt.Printf("MainWorkflow: SanctionsModuleStep result: %+v\n", output)
-		results.OutputSanctionsModule = output
+	opts2 := opts
+	opts2 = append(opts2, dbos.WithStepName("SanctionsModuleStep"))
+	output2, err := dbos.RunAsStep(dbosCtx, steps.SanctionsModuleStep, opts2...)
+	if err != nil {
+		fmt.Printf("MainWorkflow: SanctionsModuleStep: error %+v\n", err)
+		return responses.WorkflowResultPhase2{}, err
 	}
+	results.OutputSanctionsModule = output2
+
 	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
 
 	return *results, nil
