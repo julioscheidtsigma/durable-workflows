@@ -131,10 +131,6 @@ func MainWorkflowChildren(dbosCtx dbos.DBOSContext, params requests.WorkflowPara
 }
 
 func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
-	// workflow id is the same as the idempotency key
-	workflowID, _ := dbosCtx.GetWorkflowID()
-	fmt.Printf("MainWorkflowPhase1: workflowID %+v\n", workflowID)
-
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue("paramsPhase1", paramsPhase1)
 
@@ -174,10 +170,6 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 }
 
 func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, paramsPhase2 requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
-	// workflow id is the same as the idempotency key
-	workflowID, _ := dbosCtx.GetWorkflowID()
-	fmt.Printf("MainWorkflowPhase2: workflowID %+v\n", workflowID)
-
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue("paramsPhase2", paramsPhase2)
 

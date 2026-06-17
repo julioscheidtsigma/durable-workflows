@@ -111,31 +111,20 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		query := r.URL.Query()
 		name := query.Get("name")
 		step := steps.ParseStepFromQuery(query.Get("step"))
-		params := requests.WorkflowParams{
-			Name: name,
-			Step: step,
-		}
-		fmt.Printf("ForkWorkflowHandler: params %+v\n", params)
-		paramsWrapper := requests.WorkflowParamsWrapper{
-			PositionalArgs: []requests.WorkflowParams{params},
-			NamedArgs:      map[string]any{},
-		}
-		fmt.Printf("ForkWorkflowHandler: paramsWrapper %+v\n", paramsWrapper)
 
 		originalWorkflow := models.Workflow{}
-		_ = conn.QueryRow(dbosCtx, `
-		SELECT
-			workflow_uuid, status, name, inputs, output, error, queue_name, serialization, rate_limited, application_version
-		FROM dbos.workflow_status
-		WHERE workflow_uuid = $1
-		LIMIT 1
-		`, originalWorkflowID).Scan(
+		fetchQuery := `SELECT
+			workflow_uuid, status, name, inputs, output,
+			queue_name, serialization, rate_limited, application_version
+			FROM dbos.workflow_status
+			WHERE workflow_uuid = $1
+			LIMIT 1`
+		_ = conn.QueryRow(dbosCtx, fetchQuery, originalWorkflowID).Scan(
 			&originalWorkflow.WorkflowUUID,
 			&originalWorkflow.Status,
 			&originalWorkflow.Name,
 			&originalWorkflow.Inputs,
 			&originalWorkflow.Output,
-			&originalWorkflow.Error,
 			&originalWorkflow.Queue,
 			&originalWorkflow.Serialization,
 			&originalWorkflow.RateLimited,
@@ -143,25 +132,29 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		)
 		fmt.Printf("originalWorkflow: %+v\n", originalWorkflow)
 
+		inputs := originalWorkflow.Inputs
+		fmt.Printf("old input: %+v\n", inputs)
+
 		// prepare the new input for the forked workflow
-		fmt.Printf("old input: %+v\n", originalWorkflow.Inputs)
-		newInput := paramsWrapper.ToJSON()
-		fmt.Printf("new input: %+v\n", newInput)
+		if name != "" {
+			paramsWrapper := requests.WorkflowParamsWrapper{
+				PositionalArgs: []requests.WorkflowParams{
+					{
+						Name: name,
+						Step: step,
+					},
+				},
+				NamedArgs: map[string]any{},
+			}
+			inputs = paramsWrapper.ToJSON()
+			fmt.Printf("new input: %+v\n", inputs)
+		}
 
 		insertQuery := `INSERT INTO dbos.workflow_status (
-			workflow_uuid,
-			status,
-			name,
-			application_version,
-			queue_name,
-			inputs,
-			created_at,
-			updated_at,
-			recovery_attempts,
-			forked_from,
-			was_forked_from,
-			serialization,
-			rate_limited
+			workflow_uuid, status, name, application_version,
+			queue_name, inputs, created_at, updated_at,
+			recovery_attempts, forked_from, was_forked_from,
+			serialization, rate_limited
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
@@ -175,7 +168,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			originalWorkflow.Name,
 			originalWorkflow.ApplicationVersion,
 			originalWorkflow.Queue,
-			newInput,                       // encoded
+			inputs,                         // encoded
 			time.Now().UnixMilli(),         // created_at
 			time.Now().UnixMilli(),         // updated_at
 			0,                              // recovery_attempts
