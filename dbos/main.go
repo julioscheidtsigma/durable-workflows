@@ -9,8 +9,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
+	"github.com/julioscheidtsigma/dbos/models"
 	"github.com/julioscheidtsigma/dbos/requests"
 	"github.com/julioscheidtsigma/dbos/responses"
 	"github.com/julioscheidtsigma/dbos/steps"
@@ -19,12 +22,10 @@ import (
 )
 
 const (
-	USE_WORKFLOW_CHILDREN = true
-)
-
-var (
-	queueWorkerConcurrency = 10
-	queueRateLimiterLimit  = 100
+	UseWorkflowChildren = false
+	// queue controls
+	QueueWorkerConcurrency = 10
+	QueueRateLimiterLimit  = 100
 )
 
 type WorkflowItem struct {
@@ -63,7 +64,7 @@ func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
 	}
 }
 
-func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		name := query.Get("name")
@@ -80,12 +81,15 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
 
 		var err error
-		if USE_WORKFLOW_CHILDREN {
-			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflowChildren, params,
-				dbos.WithWorkflowID(workflowID), dbos.WithQueue(queue.Name))
+		opts := []dbos.WorkflowOption{}
+		opts = append(opts, dbos.WithQueue(queue.Name))
+		opts = append(opts, dbos.WithPortableWorkflow()) // marks the workflow to use JSON format for all serialized data
+		opts = append(opts, dbos.WithWorkflowID(workflowID))
+
+		if UseWorkflowChildren {
+			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflowChildren, params, opts...)
 		} else {
-			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params,
-				dbos.WithWorkflowID(workflowID), dbos.WithQueue(queue.Name))
+			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		}
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -98,40 +102,117 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 	}
 }
 
-func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workflowID := r.PathValue("uuid")
 		step, _ := strconv.ParseUint(r.PathValue("step"), 10, 64)
 		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
 
+		originalWorkflow := models.Workflow{}
+		_ = conn.QueryRow(dbosCtx, `
+		SELECT
+			workflow_uuid, status, name, inputs, output, error, queue_name, serialization, rate_limited, application_version
+		FROM dbos.workflow_status
+		WHERE workflow_uuid = $1
+		LIMIT 1
+		`, workflowID).Scan(
+			&originalWorkflow.WorkflowUUID,
+			&originalWorkflow.Status,
+			&originalWorkflow.Name,
+			&originalWorkflow.Inputs,
+			&originalWorkflow.Output,
+			&originalWorkflow.Error,
+			&originalWorkflow.Queue,
+			&originalWorkflow.Serialization,
+			&originalWorkflow.RateLimited,
+			&originalWorkflow.ApplicationVersion,
+		)
+		fmt.Printf("originalWorkflow: %+v\n", originalWorkflow)
+
+		insertQuery := `INSERT INTO dbos.workflow_status (
+			workflow_uuid,
+			status,
+			name,
+			application_version,
+			queue_name,
+			inputs,
+			created_at,
+			updated_at,
+			recovery_attempts,
+			forked_from,
+			was_forked_from,
+			serialization,
+			rate_limited
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		forkedWorkflowID := uuid.New().String()
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
-		handle, err := dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
-			OriginalWorkflowID: workflowID,
-			ForkedWorkflowID:   forkedWorkflowID,
-			QueueName:          workflows.QUEUE,
-			StartStep:          uint(step),
-		})
-		if err != nil {
+		// TODO: prepare the new input for the forked workflow
+
+		// copy the original workflow
+		_, errFork := conn.Exec(dbosCtx, insertQuery,
+			forkedWorkflowID,
+			"ENQUEUED", // status
+			originalWorkflow.Name,
+			originalWorkflow.ApplicationVersion,
+			originalWorkflow.Queue,
+			originalWorkflow.Inputs,        // encoded
+			time.Now().UnixMilli(),         // created_at
+			time.Now().UnixMilli(),         // updated_at
+			0,                              // recovery_attempts
+			workflowID,                     // forked_from
+			true,                           // was_forked_from
+			originalWorkflow.Serialization, // serialization
+			originalWorkflow.RateLimited,   // rate_limited
+		)
+		if errFork != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "ForkWorkflowHandler: error re-running workflow %+v\n", err)
+			fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", errFork)
 			return
 		}
+
+		copyOutputsQuery := `INSERT INTO dbos.operation_outputs
+			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms)
+			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms
+			FROM dbos.operation_outputs
+			WHERE workflow_uuid = $2 AND function_id < $3`
+		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, workflowID, step)
+		if errCopy != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", errCopy)
+			return
+		}
+
+		var handle any = nil
+
+		// handle, err := dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
+		// 	OriginalWorkflowID: workflowID,
+		// 	ForkedWorkflowID:   forkedWorkflowID,
+		// 	QueueName:          workflows.QueueName,
+		// 	StartStep:          uint(step),
+		// })
+		// if err != nil {
+		// 	w.WriteHeader(http.StatusInternalServerError)
+		// 	fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", err)
+		// 	return
+		// }
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		apiResponse, _ := json.Marshal(handle)
-		fmt.Fprint(w, string(apiResponse))
+		result, _ := json.Marshal(handle)
+		fmt.Fprint(w, string(result))
 	}
 }
 
-func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) http.HandlerFunc {
+func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		workflows, err := dbos.ListWorkflows(dbosCtx, dbos.WithQueueName(workflows.QUEUE),
-			dbos.WithLoadInput(true), dbos.WithLoadOutput(true))
+		workflows, err := dbos.ListWorkflows(dbosCtx,
+			dbos.WithQueueName(workflows.QueueName),
+			dbos.WithLoadInput(true),
+			dbos.WithLoadOutput(true))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "ListWorkflowsHandler: error listing workflows %+v\n", err)
@@ -141,13 +222,13 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, queue dbos.WorkflowQueue) ht
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		items := make([]WorkflowItem, 0)
+		response := make([]WorkflowItem, 0)
 		for _, ws := range workflows {
-			items = append(items, WorkflowItemFromStatus(ws))
+			response = append(response, WorkflowItemFromStatus(ws))
 		}
 
-		apiResponse, _ := json.Marshal(items)
-		fmt.Fprint(w, string(apiResponse))
+		result, _ := json.Marshal(response)
+		fmt.Fprint(w, string(result))
 	}
 }
 
@@ -193,31 +274,37 @@ func main() {
 
 	ctx := context.Background()
 
+	conn, errConn := pgx.Connect(ctx, dbURL)
+	if errConn != nil {
+		fmt.Printf("Error connecting to database: %s\n", errConn)
+	}
+
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	// Initialize a DBOS context
-	dbosCtx, err := dbos.NewDBOSContext(ctx, dbos.Config{
+	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{
 		DatabaseURL:     dbURL,
 		AppName:         "edd",
 		DatabaseSchema:  "dbos", // default
 		ConductorAPIKey: conductorKey,
 	})
-	if err != nil {
-		fmt.Printf("Error creating DBOS: %s\n", err)
+	if errInit != nil {
+		fmt.Printf("Error creating DBOS: %s\n", errInit)
 	}
 
 	// Register workflows
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow)
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren)
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1)
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2)
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow, dbos.WithWorkflowName("MainWorkflow"))
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren, dbos.WithWorkflowName("MainWorkflowChildren"))
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1, dbos.WithWorkflowName("MainWorkflowPhase1"))
+	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2, dbos.WithWorkflowName("MainWorkflowPhase2"))
 
 	// Create a queue
-	eddQueue := dbos.NewWorkflowQueue(dbosCtx, workflows.QUEUE,
-		dbos.WithWorkerConcurrency(queueWorkerConcurrency),
-		dbos.WithRateLimiter(&dbos.RateLimiter{
-			Limit:  queueRateLimiterLimit,
-			Period: 60 * time.Second,
-		}),
+	rateLimiter := &dbos.RateLimiter{
+		Limit:  QueueRateLimiterLimit,
+		Period: 60 * time.Second,
+	}
+	eddQueue := dbos.NewWorkflowQueue(dbosCtx, workflows.QueueName,
+		dbos.WithWorkerConcurrency(QueueWorkerConcurrency),
+		dbos.WithRateLimiter(rateLimiter),
 		dbos.WithPriorityEnabled(),
 		dbos.WithQueueBasePollingInterval(1*time.Second),
 		dbos.WithQueueMaxPollingInterval(60*time.Second),
@@ -233,13 +320,13 @@ func main() {
 
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 
-	startWorkflowHandler := StartWorkflowHandler(dbosCtx, eddQueue)
+	startWorkflowHandler := StartWorkflowHandler(dbosCtx, conn, eddQueue)
 	http.HandleFunc("/workflow/start", startWorkflowHandler)
 
-	forkWorkflowHandler := ForkWorkflowHandler(dbosCtx, eddQueue)
+	forkWorkflowHandler := ForkWorkflowHandler(dbosCtx, conn, eddQueue)
 	http.HandleFunc("/workflow/fork/{uuid}/step/{step}", forkWorkflowHandler)
 
-	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, eddQueue)
+	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, conn, eddQueue)
 	http.HandleFunc("/workflow", listWorkflowsHandler)
 
 	changeFailureProbabilityHandler := ChangeFailureProbabilityHandler()

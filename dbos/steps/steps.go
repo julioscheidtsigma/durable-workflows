@@ -28,41 +28,42 @@ func ParseStepFromQuery(stepStr string) constants.Step {
 	return step
 }
 
-func GenericWorkflowStep(ctx context.Context, stepName string, fn func()) (string, error) {
+func GenericWorkflowStep(ctx context.Context, stepName string) (string, error) {
 	// inject failure to test retries
 	if err := utils.RandomlyFail(); err != nil {
 		return "", err
 	}
-	fn()
+	time.Sleep(10 * time.Second)
 	return fmt.Sprintf("%s succeeded", stepName), nil
 }
 
-func sleep() {
-	time.Sleep((10 * time.Second))
+func PlaceholderStep(ctx context.Context) (any, error) {
+	fmt.Println("PlaceholderStep executed")
+	return nil, nil
 }
 
 // phase 1
 func DataCollectionStep(ctx context.Context) (string, error) {
-	params := ctx.Value("params").(requests.WorkflowParamsPhase1)
-	fmt.Printf("DataCollectionStep params: %+v\n", params)
-	return GenericWorkflowStep(ctx, "DataCollectionStep", sleep)
+	paramsPhase1 := ctx.Value("paramsPhase1").(requests.WorkflowParamsPhase1)
+	fmt.Printf("DataCollectionStep paramsPhase1: %+v\n", paramsPhase1)
+	return GenericWorkflowStep(ctx, "DataCollectionStep")
 }
 
 func EvidencesCollectionStep(ctx context.Context) (string, error) {
-	params := ctx.Value("params").(requests.WorkflowParamsPhase1)
-	fmt.Printf("EvidencesCollectionStep params: %+v\n", params)
-	return GenericWorkflowStep(ctx, "EvidencesCollectionStep", sleep)
+	paramsPhase1 := ctx.Value("paramsPhase1").(requests.WorkflowParamsPhase1)
+	fmt.Printf("EvidencesCollectionStep paramsPhase1: %+v\n", paramsPhase1)
+	return GenericWorkflowStep(ctx, "EvidencesCollectionStep")
 }
 
 // phase 2
 func PepModuleStep(ctx context.Context) (string, error) {
-	params := ctx.Value("params").(requests.WorkflowParamsPhase2)
-	fmt.Printf("PepModuleStep params: %+v\n", params)
-	return GenericWorkflowStep(ctx, "PepModuleStep", sleep)
+	paramsPhase2 := ctx.Value("paramsPhase2").(requests.WorkflowParamsPhase2)
+	fmt.Printf("PepModuleStep paramsPhase2: %+v\n", paramsPhase2)
+	return GenericWorkflowStep(ctx, "PepModuleStep")
 }
 
 func SanctionsModuleStep(ctx context.Context) (string, error) {
-	params := ctx.Value("params").(requests.WorkflowParamsPhase2)
-	fmt.Printf("SanctionsModuleStep params: %+v\n", params)
-	return GenericWorkflowStep(ctx, "SanctionsModuleStep", sleep)
+	paramsPhase2 := ctx.Value("paramsPhase2").(requests.WorkflowParamsPhase2)
+	fmt.Printf("SanctionsModuleStep paramsPhase2: %+v\n", paramsPhase2)
+	return GenericWorkflowStep(ctx, "SanctionsModuleStep")
 }
