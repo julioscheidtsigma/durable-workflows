@@ -151,7 +151,7 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 		output, err := dbos.RunAsStep(dbosCtx, steps.DataCollectionStep, opts1...)
 		if err != nil {
 			fmt.Printf("MainWorkflowPhase1: DataCollectionStep: error %+v\n", err)
-			return responses.WorkflowResultPhase1{}, err // return early if this step fails, can be changed based on the requirement
+			return responses.WorkflowResultPhase1{}, err
 		}
 		fmt.Printf("MainWorkflowPhase1: DataCollectionStep result: %+v\n", output)
 		results.OutputDataCollection = output
@@ -163,7 +163,7 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 		output, err := dbos.RunAsStep(dbosCtx, steps.EvidencesCollectionStep, opts2...)
 		if err != nil {
 			fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep: error %+v\n", err)
-			return responses.WorkflowResultPhase1{}, err // return early if this step fails, can be changed based on the requirement
+			return responses.WorkflowResultPhase1{}, err
 		}
 		fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep result: %+v\n", output)
 		results.OutputEvidencesCollection = output
@@ -194,7 +194,7 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, paramsPhase2 requests.Workflow
 		output, err := dbos.RunAsStep(dbosCtx, steps.PepModuleStep, opts1...)
 		if err != nil {
 			fmt.Printf("MainWorkflow: PepModuleStep: error %+v\n", err)
-			return responses.WorkflowResultPhase2{}, err // return early if this step fails, can be changed based on the requirement
+			return responses.WorkflowResultPhase2{}, err
 		}
 		fmt.Printf("MainWorkflow: PepModuleStep result: %+v\n", output)
 		results.OutputPepModule = output
@@ -206,7 +206,7 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, paramsPhase2 requests.Workflow
 		output, err := dbos.RunAsStep(dbosCtx, steps.SanctionsModuleStep, opts2...)
 		if err != nil {
 			fmt.Printf("MainWorkflow: SanctionsModuleStep: error %+v\n", err)
-			return responses.WorkflowResultPhase2{}, err // return early if this step fails, can be changed based on the requirement
+			return responses.WorkflowResultPhase2{}, err
 		}
 		fmt.Printf("MainWorkflow: SanctionsModuleStep result: %+v\n", output)
 		results.OutputSanctionsModule = output

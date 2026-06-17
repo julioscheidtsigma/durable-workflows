@@ -104,9 +104,23 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 
 func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		workflowID := r.PathValue("uuid")
-		step, _ := strconv.ParseUint(r.PathValue("step"), 10, 64)
-		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
+		originalWorkflowID := r.PathValue("uuid")
+		startStep, _ := strconv.ParseUint(r.PathValue("startStep"), 10, 64)
+		fmt.Printf("ForkWorkflowHandler: startStep %+v\n", startStep)
+
+		query := r.URL.Query()
+		name := query.Get("name")
+		step := steps.ParseStepFromQuery(query.Get("step"))
+		params := requests.WorkflowParams{
+			Name: name,
+			Step: step,
+		}
+		fmt.Printf("ForkWorkflowHandler: params %+v\n", params)
+		paramsWrapper := requests.WorkflowParamsWrapper{
+			PositionalArgs: []requests.WorkflowParams{params},
+			NamedArgs:      map[string]any{},
+		}
+		fmt.Printf("ForkWorkflowHandler: paramsWrapper %+v\n", paramsWrapper)
 
 		originalWorkflow := models.Workflow{}
 		_ = conn.QueryRow(dbosCtx, `
@@ -115,7 +129,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		FROM dbos.workflow_status
 		WHERE workflow_uuid = $1
 		LIMIT 1
-		`, workflowID).Scan(
+		`, originalWorkflowID).Scan(
 			&originalWorkflow.WorkflowUUID,
 			&originalWorkflow.Status,
 			&originalWorkflow.Name,
@@ -128,6 +142,11 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			&originalWorkflow.ApplicationVersion,
 		)
 		fmt.Printf("originalWorkflow: %+v\n", originalWorkflow)
+
+		// prepare the new input for the forked workflow
+		fmt.Printf("old input: %+v\n", originalWorkflow.Inputs)
+		newInput := paramsWrapper.ToJSON()
+		fmt.Printf("new input: %+v\n", newInput)
 
 		insertQuery := `INSERT INTO dbos.workflow_status (
 			workflow_uuid,
@@ -149,8 +168,6 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		forkedWorkflowID := uuid.New().String()
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
-		// TODO: prepare the new input for the forked workflow
-
 		// copy the original workflow
 		_, errFork := conn.Exec(dbosCtx, insertQuery,
 			forkedWorkflowID,
@@ -158,11 +175,11 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			originalWorkflow.Name,
 			originalWorkflow.ApplicationVersion,
 			originalWorkflow.Queue,
-			originalWorkflow.Inputs,        // encoded
+			newInput,                       // encoded
 			time.Now().UnixMilli(),         // created_at
 			time.Now().UnixMilli(),         // updated_at
 			0,                              // recovery_attempts
-			workflowID,                     // forked_from
+			originalWorkflowID,             // forked_from
 			true,                           // was_forked_from
 			originalWorkflow.Serialization, // serialization
 			originalWorkflow.RateLimited,   // rate_limited
@@ -174,24 +191,22 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		}
 
 		copyOutputsQuery := `INSERT INTO dbos.operation_outputs
-			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms)
-			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms
+			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
+			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization
 			FROM dbos.operation_outputs
 			WHERE workflow_uuid = $2 AND function_id < $3`
-		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, workflowID, step)
+		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, originalWorkflowID, startStep)
 		if errCopy != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", errCopy)
 			return
 		}
 
-		var handle any = nil
-
 		// handle, err := dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
 		// 	OriginalWorkflowID: workflowID,
 		// 	ForkedWorkflowID:   forkedWorkflowID,
 		// 	QueueName:          workflows.QueueName,
-		// 	StartStep:          uint(step),
+		// 	StartStep:          uint(startStep),
 		// })
 		// if err != nil {
 		// 	w.WriteHeader(http.StatusInternalServerError)
@@ -201,9 +216,8 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-
-		result, _ := json.Marshal(handle)
-		fmt.Fprint(w, string(result))
+		// result, _ := json.Marshal(handle)
+		// fmt.Fprint(w, string(result))
 	}
 }
 
@@ -324,7 +338,7 @@ func main() {
 	http.HandleFunc("/workflow/start", startWorkflowHandler)
 
 	forkWorkflowHandler := ForkWorkflowHandler(dbosCtx, conn, eddQueue)
-	http.HandleFunc("/workflow/fork/{uuid}/step/{step}", forkWorkflowHandler)
+	http.HandleFunc("/workflow/fork/{uuid}/start/{startStep}", forkWorkflowHandler)
 
 	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, conn, eddQueue)
 	http.HandleFunc("/workflow", listWorkflowsHandler)
