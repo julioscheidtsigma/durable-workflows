@@ -31,30 +31,28 @@ Examples to call the API and execute the workflows:
 
 ```bash
 # This will enqueue the workflow, execute all steps (`step=0`), and just return the workflow was triggered
-curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=0"
-# StartWorkflowHandler: workflow triggered successfully
+curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=0"
 
 # This will enqueue the workflow, and execute only the second step
-curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=2"
-# StartWorkflowHandler: workflow triggered successfully
+curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=2"
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific step - changing the inputs
-curl -s -X GET "http://localhost:8585/workflow/fork/afe52ad2-21fc-4d99-9f6b-8beff294038a/start/3?name=Volodymyr%20Zelenskyy&runStep=0"
+curl -s -X POST "http://localhost:8585/workflow/fork/afe52ad2-21fc-4d99-9f6b-8beff294038a/start/3?name=Volodymyr%20Zelenskyy&runStep=0"
 
 # fork a workflow at specific step - same input - failed workflows
-curl -s -X GET "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
+curl -s -X POST "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
 
 
 # change failure probability
-curl -s -X GET "http://localhost:8585/failure?probability=0.0"
-curl -s -X GET "http://localhost:8585/failure?probability=0.5"
-curl -s -X GET "http://localhost:8585/failure?probability=1.0"
+curl -s -X POST "http://localhost:8585/failure?probability=0.0"
+curl -s -X POST "http://localhost:8585/failure?probability=0.5"
+curl -s -X POST "http://localhost:8585/failure?probability=1.0"
 
 # crash testing
-curl -s -X GET "http://localhost:8585/crash"
+curl -s -X POST "http://localhost:8585/crash"
 ```
 
 #### Docs

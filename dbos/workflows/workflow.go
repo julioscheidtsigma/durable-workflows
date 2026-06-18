@@ -22,11 +22,8 @@ func buildStepName(level int, stepName string) string {
 }
 
 func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (responses.WorkflowResult, error) {
-	// workflowID, _ := dbosCtx.GetWorkflowID()
-
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue("params", params)
-	fmt.Printf("MainWorkflow: params %+v\n", params)
 
 	runAllSteps := params.RunStep.RunAllSteps()
 	dbosCtx = dbosCtx.WithValue("dataCollectionEnabled", runAllSteps || params.RunStep == constants.RUN_STEP_DATA_COLLECTION)
@@ -90,7 +87,6 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue(steps.Phase1Params, params)
-	// fmt.Printf("MainWorkflowPhase1 params: %+v\n", params)
 	results := &responses.WorkflowResultPhase1{}
 
 	opts1 := utils.GetStepOpts()
@@ -111,14 +107,12 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	}
 	results.OutputEvidencesCollection = output2
 
-	// fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
 	return *results, nil
 }
 
 func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue(steps.Phase2Params, params)
-	// fmt.Printf("MainWorkflowPhase2 params: %+v\n", params)
 	results := &responses.WorkflowResultPhase2{}
 
 	opts1 := utils.GetStepOpts()
@@ -139,6 +133,5 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	}
 	results.OutputSanctions = output2
 
-	// fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
 	return *results, nil
 }

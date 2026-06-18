@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/labstack/echo/v4"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
@@ -29,6 +29,10 @@ const (
 	// fields
 	EnqueuedStatus = "ENQUEUED"
 )
+
+func buildErrorResponse(message string) map[string]string {
+	return map[string]string{"error": message}
+}
 
 type WorkflowItem struct {
 	UUID          string    `json:"uuid"`
@@ -66,11 +70,11 @@ func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
 	}
 }
 
-func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		name := query.Get("name")
-		runStep := steps.ParseRunStep(query.Get("runStep"))
+func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		r := c.Request()
+		name := r.URL.Query().Get("name")
+		runStep := steps.ParseRunStep(r.URL.Query().Get("runStep"))
 		fmt.Printf("StartWorkflowHandler: runStep %+v\n", runStep)
 
 		params := requests.WorkflowParams{
@@ -83,26 +87,25 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 		opts := utils.GetWorkflowOpts(workflowID)
 		_, err := dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
-			return
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error starting workflow"))
 		}
 
-		w.WriteHeader(http.StatusOK)
 		result := responses.WorkflowUUIDResult{UUID: workflowID}
-		fmt.Fprint(w, string(result.ToJSON()))
+		return c.JSON(http.StatusOK, result)
 	}
 }
 
-func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		originalWorkflowID := r.PathValue("uuid")
-		startStep, _ := strconv.ParseUint(r.PathValue("startStep"), 10, 64)
+func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		originalWorkflowID := c.Param("uuid")
+		startStep, errParse := strconv.ParseUint(c.Param("startStep"), 10, 64)
+		if errParse != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing startStep parameter"))
+		}
 		fmt.Printf("ForkWorkflowHandler: startStep %+v\n", startStep)
 
-		query := r.URL.Query()
-		name := query.Get("name")
-		runStep := steps.ParseRunStep(query.Get("runStep"))
+		name := c.QueryParam("name")
+		runStep := steps.ParseRunStep(c.QueryParam("runStep"))
 
 		originalWorkflow := models.Workflow{}
 		fetchQuery := `
@@ -114,7 +117,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			WHERE workflow_uuid = $1
 			LIMIT 1
 		`
-		_ = conn.QueryRow(dbosCtx, fetchQuery, originalWorkflowID).Scan(
+		errScan := conn.QueryRow(dbosCtx, fetchQuery, originalWorkflowID).Scan(
 			&originalWorkflow.WorkflowUUID,
 			&originalWorkflow.Status,
 			&originalWorkflow.Name,
@@ -125,6 +128,9 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			&originalWorkflow.RateLimited,
 			&originalWorkflow.ApplicationVersion,
 		)
+		if errScan != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
+		}
 		fmt.Printf("originalWorkflow: %+v\n", originalWorkflow)
 
 		inputs := originalWorkflow.Inputs
@@ -169,9 +175,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			originalWorkflow.RateLimited,   // rate_limited
 		)
 		if errFork != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", errFork)
-			return
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
 		// SKIPPED steps will also be copied
@@ -182,63 +186,48 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			WHERE workflow_uuid = $2 AND function_id < $3`
 		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, originalWorkflowID, startStep)
 		if errCopy != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", errCopy)
-			return
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
 		result := responses.WorkflowUUIDResult{UUID: forkedWorkflowID}
-		fmt.Fprint(w, string(result.ToJSON()))
+		return c.JSON(http.StatusOK, result)
 	}
 }
 
-func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		workflows, err := dbos.ListWorkflows(dbosCtx,
 			dbos.WithQueueName(constants.QueueName),
 			dbos.WithLoadInput(true),
 			dbos.WithLoadOutput(true))
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "ListWorkflowsHandler: error listing workflows %+v\n", err)
-			return
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error listing workflows"))
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		response := make([]WorkflowItem, 0)
+		result := make([]WorkflowItem, 0)
 		for _, ws := range workflows {
-			response = append(response, WorkflowItemFromStatus(ws))
+			result = append(result, WorkflowItemFromStatus(ws))
 		}
-
-		result, _ := json.Marshal(response)
-		fmt.Fprint(w, string(result))
+		return c.JSON(http.StatusOK, result)
 	}
 }
 
-func ChangeFailureProbabilityHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		probStr := query.Get("probability")
+func ChangeFailureProbabilityHandler() echo.HandlerFunc {
+	return func(c echo.Context) error {
+		probStr := c.QueryParam("probability")
 		prob, err := strconv.ParseFloat(probStr, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "ChangeFailureProbabilityHandler: invalid probability value %+v\n", probStr)
-			return
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("invalid probability value"))
 		}
 		utils.ChangeFailureProbability(prob)
-
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "ChangeFailureProbabilityHandler: failure probability changed to %+v\n", prob)
+		return c.JSON(http.StatusOK, map[string]string{"message": "failure probability updated"})
 	}
 }
 
-func CrashHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CrashHandler() echo.HandlerFunc {
+	return func(c echo.Context) error {
 		os.Exit(1)
+		return nil
 	}
 }
 
@@ -260,7 +249,6 @@ func main() {
 	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", user, pass, host, port, database)
 
 	ctx := context.Background()
-
 	conn, errConn := pgx.Connect(ctx, dbURL)
 	if errConn != nil {
 		fmt.Printf("Error connecting to database: %s\n", errConn)
@@ -280,9 +268,6 @@ func main() {
 
 	// Register workflows
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow, dbos.WithWorkflowName("MainWorkflow"))
-	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1, dbos.WithWorkflowName("MainWorkflowPhase1"))
-	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2, dbos.WithWorkflowName("MainWorkflowPhase2"))
-
 	// Create a queue
 	rateLimiter := &dbos.RateLimiter{
 		Limit:  QueueRateLimiterLimit,
@@ -306,22 +291,14 @@ func main() {
 
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 
-	startWorkflowHandler := StartWorkflowHandler(dbosCtx, conn, eddQueue)
-	http.HandleFunc("/workflow/start", startWorkflowHandler)
+	e := echo.New()
+	e.POST("/workflow/start", StartWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow/fork/:uuid/start/:startStep", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
+	e.POST("/failure", ChangeFailureProbabilityHandler())
+	e.POST("/crash", CrashHandler())
 
-	forkWorkflowHandler := ForkWorkflowHandler(dbosCtx, conn, eddQueue)
-	http.HandleFunc("/workflow/fork/{uuid}/start/{startStep}", forkWorkflowHandler)
-
-	listWorkflowsHandler := ListWorkflowsHandler(dbosCtx, conn, eddQueue)
-	http.HandleFunc("/workflow", listWorkflowsHandler)
-
-	changeFailureProbabilityHandler := ChangeFailureProbabilityHandler()
-	http.HandleFunc("/failure", changeFailureProbabilityHandler)
-
-	crashHandler := CrashHandler()
-	http.HandleFunc("/crash", crashHandler)
-
-	errListen := http.ListenAndServe(":8585", nil)
+	errListen := e.Start(":8585")
 	if errListen != nil {
 		fmt.Printf("Error starting server: %s\n", errListen)
 	}
