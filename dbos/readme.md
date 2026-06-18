@@ -42,7 +42,7 @@ curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific step - changing the inputs
-curl -s -X GET "http://localhost:8585/workflow/fork/aaa474d2-8be7-4788-9f7e-c5f4083baca7/start/3?name=Volodymyr%20Zelenskyy&runStep=4"
+curl -s -X GET "http://localhost:8585/workflow/fork/39aa0077-5451-4329-8759-8b44abedd09e/start/3?name=Volodymyr%20Zelenskyy&runStep=4"
 
 curl -s -X GET "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
 

@@ -23,9 +23,7 @@ func buildStepName(level int, stepName string) string {
 }
 
 func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (responses.WorkflowResult, error) {
-	// workflow id is the same as the idempotency key
-	workflowID, _ := dbosCtx.GetWorkflowID()
-	fmt.Printf("MainWorkflow: workflowID %+v\n", workflowID)
+	// workflowID, _ := dbosCtx.GetWorkflowID()
 
 	// inject params into the context so that steps can access it
 	dbosCtx = dbosCtx.WithValue("params", params)
@@ -80,8 +78,8 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	}
 
 	results := responses.WorkflowResult{
-		Phase1: resultPhase1,
-		Phase2: resultPhase2,
+		WorkflowResultPhase1: resultPhase1,
+		WorkflowResultPhase2: resultPhase2,
 	}
 
 	// send results to a channel to be consumed by another goroutine
@@ -114,7 +112,7 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	}
 	results.OutputEvidencesCollection = output2
 
-	fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
+	// fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
 	return *results, nil
 }
 
@@ -142,6 +140,6 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	}
 	results.OutputSanctions = output2
 
-	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
+	// fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
 	return *results, nil
 }

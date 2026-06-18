@@ -13,8 +13,8 @@ type WorkflowResultPhase2 struct {
 }
 
 type WorkflowResult struct {
-	Phase1 WorkflowResultPhase1
-	Phase2 WorkflowResultPhase2
+	WorkflowResultPhase1
+	WorkflowResultPhase2
 }
 
 func (wr WorkflowResult) ToJSON() string {
