@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/julioscheidtsigma/dbos/api/requests"
 	"github.com/julioscheidtsigma/dbos/api/responses"
+	"github.com/julioscheidtsigma/dbos/db"
 	"github.com/julioscheidtsigma/dbos/pkg/constants"
-	"github.com/julioscheidtsigma/dbos/pkg/models"
 	"github.com/julioscheidtsigma/dbos/pkg/modules"
 	"github.com/julioscheidtsigma/dbos/pkg/utils"
 	"github.com/julioscheidtsigma/dbos/pkg/workflows"
@@ -97,44 +97,23 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		originalWorkflowID := c.Param("uuid")
-		step, errParse := strconv.ParseUint(c.Param("step"), 10, 64)
+		step, errParse := strconv.ParseInt(c.Param("step"), 10, 64)
 		if errParse != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing step parameter"))
 		}
+		fmt.Printf("ForkWorkflowHandler: originalWorkflowID %+v\n", originalWorkflowID)
 		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
+
+		originalWorkflow, errScan := db.GetWorkflow(dbosCtx, conn, originalWorkflowID)
+		if errScan != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
+		}
 
 		name := c.QueryParam("name")
 		runModules := modules.ParseRunModule(c.QueryParam("runModules"))
 
-		originalWorkflow := models.Workflow{}
-		fetchQuery := `
-			SELECT
-				workflow_uuid, status, name, inputs, 
-				output, queue_name, serialization,
-				rate_limited, application_version
-			FROM dbos.workflow_status
-			WHERE workflow_uuid = $1
-			LIMIT 1
-		`
-		errScan := conn.QueryRow(dbosCtx, fetchQuery, originalWorkflowID).Scan(
-			&originalWorkflow.WorkflowUUID,
-			&originalWorkflow.Status,
-			&originalWorkflow.Name,
-			&originalWorkflow.Inputs,
-			&originalWorkflow.Output,
-			&originalWorkflow.Queue,
-			&originalWorkflow.Serialization,
-			&originalWorkflow.RateLimited,
-			&originalWorkflow.ApplicationVersion,
-		)
-		if errScan != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
-		}
-		fmt.Printf("originalWorkflow: %+v\n", originalWorkflow)
-
 		inputs := originalWorkflow.Inputs
 		fmt.Printf("old input: %+v\n", inputs)
-
 		// prepare the new input for the forked workflow
 		if name != "" {
 			paramsWrapper := requests.NewWorkflowParamsWrapper(name, runModules)
@@ -142,48 +121,16 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			fmt.Printf("new input: %+v\n", inputs)
 		}
 
-		insertQuery := `
-			INSERT INTO dbos.workflow_status (
-				workflow_uuid, status, name, application_version,
-				queue_name, inputs, created_at, updated_at,
-				recovery_attempts, forked_from, was_forked_from,
-				serialization, rate_limited
-			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		`
-
-		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		forkedWorkflowID := uuid.New().String()
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
-		// copy the original workflow
-		// we used the dbosCtx.ForkWorkflow(ctx, dbos.ForkWorkflowInput) method as base to copy an existing workflow
-		_, errFork := conn.Exec(dbosCtx, insertQuery,
-			forkedWorkflowID,
-			EnqueuedStatus, // status enqueued
-			originalWorkflow.Name,
-			originalWorkflow.ApplicationVersion,
-			originalWorkflow.Queue,
-			inputs,                         // encoded
-			time.Now().UnixMilli(),         // created_at
-			time.Now().UnixMilli(),         // updated_at
-			0,                              // recovery_attempts
-			originalWorkflowID,             // forked_from
-			true,                           // was_forked_from
-			originalWorkflow.Serialization, // serialization
-			originalWorkflow.RateLimited,   // rate_limited
-		)
-		if errFork != nil {
+		errInsert := db.InsertWorkflow(dbosCtx, conn, forkedWorkflowID, inputs, originalWorkflow)
+		if errInsert != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
 		// SKIPPED modules will also be copied
-		copyOutputsQuery := `INSERT INTO dbos.operation_outputs
-			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
-			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization
-			FROM dbos.operation_outputs
-			WHERE workflow_uuid = $2 AND function_id < $3`
-		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, originalWorkflowID, step)
+		errCopy := db.CopyWorkflowOutputs(dbosCtx, conn, forkedWorkflowID, originalWorkflowID, step)
 		if errCopy != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
@@ -295,7 +242,7 @@ func main() {
 
 	e := echo.New()
 	e.POST("/workflow/start", StartWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.POST("/workflow/fork/:uuid/start/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow/fork/:uuid/step/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
 	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
 	e.POST("/failure", ChangeFailureProbabilityHandler())
 	e.POST("/crash", CrashHandler())

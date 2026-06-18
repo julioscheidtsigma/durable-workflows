@@ -40,10 +40,10 @@ curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runMod
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific module - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/fork/83dd4da1-8520-474b-a617-e35be21d15b5/start/0?name=Volodymyr%20Zelenskyy&runModules=0"
+curl -s -X POST "http://localhost:8585/workflow/fork/64a9909b-9919-49f3-95d0-73074f3785fc/step/3?name=Volodymyr%20Zelenskyy&runModules=0"
 
 # fork a workflow at specific module - same input - failed workflows
-curl -s -X POST "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
+curl -s -X POST "http://localhost:8585/workflow/fork/5226c8bd-0e22-4cfe-b82c-6c9a5db0413d/step/0"
 
 
 # change failure probability
