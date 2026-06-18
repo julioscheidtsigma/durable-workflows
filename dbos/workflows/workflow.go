@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	QueueName       = "edd-queue"
 	StepLevelPrefix = "Level"
 )
 

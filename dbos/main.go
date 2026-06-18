@@ -13,6 +13,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
+	"github.com/julioscheidtsigma/dbos/constants"
 	"github.com/julioscheidtsigma/dbos/models"
 	"github.com/julioscheidtsigma/dbos/requests"
 	"github.com/julioscheidtsigma/dbos/responses"
@@ -76,18 +77,11 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 			Name:    name,
 			RunStep: runStep,
 		}
-		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
-		// workflowID := params.IdempotencyKey()
 		workflowID := uuid.New().String()
 		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
 
-		var err error
-		opts := []dbos.WorkflowOption{}
-		opts = append(opts, dbos.WithQueue(queue.Name))
-		opts = append(opts, dbos.WithPortableWorkflow()) // marks the workflow to use JSON format for all serialized data
-		opts = append(opts, dbos.WithWorkflowID(workflowID))
-
-		_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
+		opts := utils.GetWorkflowOpts(workflowID)
+		_, err := dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
@@ -208,7 +202,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workflows, err := dbos.ListWorkflows(dbosCtx,
-			dbos.WithQueueName(workflows.QueueName),
+			dbos.WithQueueName(constants.QueueName),
 			dbos.WithLoadInput(true),
 			dbos.WithLoadOutput(true))
 		if err != nil {
@@ -291,16 +285,15 @@ func main() {
 
 	// Register workflows
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow, dbos.WithWorkflowName("MainWorkflow"))
-	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren, dbos.WithWorkflowName("MainWorkflowChildren"))
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1, dbos.WithWorkflowName("MainWorkflowPhase1"))
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2, dbos.WithWorkflowName("MainWorkflowPhase2"))
+	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1, dbos.WithWorkflowName("MainWorkflowPhase1"))
+	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2, dbos.WithWorkflowName("MainWorkflowPhase2"))
 
 	// Create a queue
 	rateLimiter := &dbos.RateLimiter{
 		Limit:  QueueRateLimiterLimit,
 		Period: 60 * time.Second,
 	}
-	eddQueue := dbos.NewWorkflowQueue(dbosCtx, workflows.QueueName,
+	eddQueue := dbos.NewWorkflowQueue(dbosCtx, constants.QueueName,
 		dbos.WithWorkerConcurrency(QueueWorkerConcurrency),
 		dbos.WithRateLimiter(rateLimiter),
 		dbos.WithPriorityEnabled(),

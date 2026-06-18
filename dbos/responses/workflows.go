@@ -17,8 +17,8 @@ type WorkflowResult struct {
 	WorkflowResultPhase2
 }
 
-func (wr WorkflowResult) ToJSON() string {
-	result, _ := json.Marshal(wr)
+func (w WorkflowResult) ToJSON() string {
+	result, _ := json.Marshal(w)
 	return string(result)
 }
 
@@ -26,8 +26,8 @@ type WorkflowUUIDResult struct {
 	UUID string `json:"uuid"`
 }
 
-func (wu WorkflowUUIDResult) ToJSON() string {
-	result, _ := json.Marshal(wu)
+func (w WorkflowUUIDResult) ToJSON() string {
+	result, _ := json.Marshal(w)
 	return string(result)
 }
 
