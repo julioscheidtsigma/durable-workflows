@@ -46,13 +46,13 @@ def get_detailed_levels(graph):
 
 if __name__ in '__main__':
   dag = {
-    'main.MainWorkflow': ['main.MainWorkflowPhase1'],
-    'main.MainWorkflowPhase1': ['main.DataCollectionStep', 'main.EvidencesCollectionStep'],
-    'main.DataCollectionStep': ['main.MainWorkflowPhase2'],
-    'main.EvidencesCollectionStep': ['main.MainWorkflowPhase2'],
-    'main.MainWorkflowPhase2': ['main.PepModuleStep', 'main.SanctionsModuleStep'],
-    'main.PepModuleStep': [],
-    'main.SanctionsModuleStep': [],
+    'MainWorkflow': ['Phase1'],
+    'Phase1': ['DataCollectionStep', 'EvidencesCollectionStep'],
+    'DataCollectionStep': ['Phase2'],
+    'EvidencesCollectionStep': ['Phase2'],
+    'Phase2': ['PepStep', 'SanctionsStep'],
+    'PepStep': [],
+    'SanctionsStep': [],
   }
   level_structure = get_detailed_levels(dag)
   print(json.dumps(level_structure, indent=2))
@@ -61,70 +61,70 @@ if __name__ in '__main__':
 {
   "Level 0": [
     {
-      "node": "main.MainWorkflow",
+      "node": "MainWorkflow",
       "parents": [],
       "children": [
-        "main.MainWorkflowPhase1"
+        "Phase1"
       ]
     }
   ],
   "Level 1": [
     {
-      "node": "main.MainWorkflowPhase1",
+      "node": "Phase1",
       "parents": [
-        "main.MainWorkflow"
+        "MainWorkflow"
       ],
       "children": [
-        "main.DataCollectionStep",
-        "main.EvidencesCollectionStep"
+        "DataCollectionStep",
+        "EvidencesCollectionStep"
       ]
     }
   ],
   "Level 2": [
     {
-      "node": "main.DataCollectionStep",
+      "node": "DataCollectionStep",
       "parents": [
-        "main.MainWorkflowPhase1"
+        "Phase1"
       ],
       "children": [
-        "main.MainWorkflowPhase2"
+        "Phase2"
       ]
     },
     {
-      "node": "main.EvidencesCollectionStep",
+      "node": "EvidencesCollectionStep",
       "parents": [
-        "main.MainWorkflowPhase1"
+        "Phase1"
       ],
       "children": [
-        "main.MainWorkflowPhase2"
+        "Phase2"
       ]
     }
   ],
   "Level 3": [
     {
-      "node": "main.MainWorkflowPhase2",
+      "node": "Phase2",
       "parents": [
-        "main.DataCollectionStep",
-        "main.EvidencesCollectionStep"
+        "DataCollectionStep",
+        "EvidencesCollectionStep"
       ],
       "children": [
-        "main.PepModuleStep",
-        "main.SanctionsModuleStep"
+        "PepStep",
+        "SanctionsStep"
       ]
     }
   ],
   "Level 4": [
     {
-      "node": "main.PepModuleStep",
+      "node": "PepStep",
       "parents": [
-        "main.MainWorkflowPhase2"
+        "Phase2"
       ],
       "children": []
     },
     {
-      "node": "main.SanctionsModuleStep",
+      "node": "SanctionsStep",
       "parents": [
-        "main.MainWorkflowPhase2"
+        "Phase2"
       ],
       "children": []
     }

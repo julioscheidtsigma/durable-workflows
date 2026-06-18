@@ -12,10 +12,15 @@ import (
 )
 
 const (
-	QueueName = "edd-queue"
+	QueueName       = "edd-queue"
+	StepLevelPrefix = "Level"
 )
 
 var QueueResultsChan = make(chan responses.WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
+
+func buildStepName(level int, stepName string) string {
+	return fmt.Sprintf("%s:%d:%s", StepLevelPrefix, level, stepName)
+}
 
 func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (responses.WorkflowResult, error) {
 	// workflow id is the same as the idempotency key
@@ -26,15 +31,27 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	dbosCtx = dbosCtx.WithValue("params", params)
 	fmt.Printf("MainWorkflow: params %+v\n", params)
 
+	runAllSteps := params.RunStep.RunAllSteps()
+	dbosCtx = dbosCtx.WithValue("dataCollectionEnabled", runAllSteps || params.RunStep == constants.RUN_STEP_DATA_COLLECTION)
+	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAllSteps || params.RunStep == constants.RUN_STEP_EVIDENCES_COLLECTION)
+	dbosCtx = dbosCtx.WithValue("pepEnabled", runAllSteps || params.RunStep == constants.RUN_STEP_PEP)
+	dbosCtx = dbosCtx.WithValue("sanctionsEnabled", runAllSteps || params.RunStep == constants.RUN_STEP_SANCTIONS)
+
+	// start at level 1
+	currentLevel := 1
+
 	// running placehold steps between phases to help in the workflow execution graph
-	_, errPhase1 := dbos.RunAsStep(dbosCtx, steps.PlaceholderStep, dbos.WithStepName("StartPhase-1"))
+	_, errPhase1 := dbos.RunAsStep(dbosCtx, steps.PlaceholderStep,
+		dbos.WithStepName(buildStepName(currentLevel, "Start")))
 	if errPhase1 != nil {
 		return responses.WorkflowResult{}, errPhase1
 	}
 
+	currentLevel++ // 2
 	paramsPhase1 := requests.WorkflowParamsPhase1{
-		Name: params.Name,
-		Step: params.Step,
+		Level:   currentLevel,
+		Name:    params.Name,
+		RunStep: params.RunStep,
 	}
 	// here we are calling the results right after starting the phase,
 	// to simulate dependencies between phases
@@ -43,15 +60,19 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 		return responses.WorkflowResult{}, err
 	}
 
-	_, errPhase2 := dbos.RunAsStep(dbosCtx, steps.PlaceholderStep, dbos.WithStepName("StartPhase-2"))
+	currentLevel++ // 3
+	_, errPhase2 := dbos.RunAsStep(dbosCtx, steps.PlaceholderStep,
+		dbos.WithStepName(buildStepName(currentLevel, "Start")))
 	if errPhase2 != nil {
 		return responses.WorkflowResult{}, errPhase2
 	}
 
+	currentLevel++ // 4
 	paramsPhase2 := requests.WorkflowParamsPhase2{
-		Name:         params.Name,
-		Step:         params.Step,
-		ResultPhase1: resultPhase1,
+		Level:   currentLevel,
+		Name:    params.Name,
+		RunStep: params.RunStep,
+		Phase1:  resultPhase1, // injecting results from a previous phase
 	}
 	resultPhase2, err := MainWorkflowPhase2(dbosCtx, paramsPhase2)
 	if err != nil {
@@ -59,91 +80,24 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	}
 
 	results := responses.WorkflowResult{
-		WorkflowResultPhase1: resultPhase1,
-		WorkflowResultPhase2: resultPhase2,
+		Phase1: resultPhase1,
+		Phase2: resultPhase2,
 	}
 
-	fmt.Printf("MainWorkflow: results %+v\n", results)
 	// send results to a channel to be consumed by another goroutine
 	QueueResultsChan <- results
 
 	return results, nil
 }
 
-func MainWorkflowChildren(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (responses.WorkflowResult, error) {
-	// workflow id is the same as the idempotency key
-	workflowID, _ := dbosCtx.GetWorkflowID()
-	fmt.Printf("MainWorkflowChildren: workflowID %+v\n", workflowID)
-
+func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
 	// inject params into the context so that steps can access it
-	dbosCtx = dbosCtx.WithValue("params", params)
-	fmt.Printf("MainWorkflowChildren: params %+v\n", params)
-
-	opts := []dbos.WorkflowOption{}
-	opts = append(opts, dbos.WithQueue(QueueName))
-	opts = append(opts, dbos.WithPortableWorkflow()) // marks the workflow to use JSON format for all serialized data
-
-	paramsPhase1 := requests.WorkflowParamsPhase1{
-		Name: params.Name,
-		Step: params.Step,
-	}
-	workflowPhase1ID := fmt.Sprintf("%s-%d", workflowID, 0)
-	optsPhase1 := opts
-	optsPhase1 = append(optsPhase1, dbos.WithWorkflowID(workflowPhase1ID))
-	// here we are calling the results right after starting the phase,
-	// to simulate dependencies between phases
-	handlePhase1, err := dbos.RunWorkflow(dbosCtx, MainWorkflowPhase1, paramsPhase1, optsPhase1...)
-	if err != nil {
-		return responses.WorkflowResult{}, err
-	}
-	resultPhase1, err := handlePhase1.GetResult()
-	if err != nil {
-		return responses.WorkflowResult{}, err
-	}
-
-	paramsPhase2 := requests.WorkflowParamsPhase2{
-		Name:         params.Name,
-		Step:         params.Step,
-		ResultPhase1: resultPhase1,
-	}
-	workflowPhase2ID := fmt.Sprintf("%s-%d", workflowID, 2)
-	optsPhase2 := opts
-	optsPhase2 = append(optsPhase2, dbos.WithWorkflowID(workflowPhase2ID))
-	handlePhase2, err := dbos.RunWorkflow(dbosCtx, MainWorkflowPhase2, paramsPhase2, optsPhase2...)
-	if err != nil {
-		return responses.WorkflowResult{}, err
-	}
-	resultPhase2, err := handlePhase2.GetResult()
-	if err != nil {
-		return responses.WorkflowResult{}, err
-	}
-
-	results := responses.WorkflowResult{
-		WorkflowResultPhase1: resultPhase1,
-		WorkflowResultPhase2: resultPhase2,
-	}
-
-	fmt.Printf("MainWorkflowChildren: results %+v\n", results)
-	// send results to a channel to be consumed by another goroutine
-	QueueResultsChan <- results
-
-	return results, nil
-}
-
-func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
-	// inject params into the context so that steps can access it
-	dbosCtx = dbosCtx.WithValue("paramsPhase1", paramsPhase1)
-
-	fmt.Printf("MainWorkflowPhase1 paramsPhase1: %+v\n", paramsPhase1)
-	opts := utils.GetStepOpts()
-
-	runAllSteps := paramsPhase1.Step.RunAllSteps()
-	dbosCtx = dbosCtx.WithValue("dataCollectionEnabled", runAllSteps || paramsPhase1.Step == constants.RUN_STEP_DATA_COLLECTION)
-	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAllSteps || paramsPhase1.Step == constants.RUN_STEP_EVIDENCES_COLLECTION)
+	dbosCtx = dbosCtx.WithValue(steps.Phase1Params, params)
+	// fmt.Printf("MainWorkflowPhase1 params: %+v\n", params)
 	results := &responses.WorkflowResultPhase1{}
 
-	opts1 := opts
-	opts1 = append(opts1, dbos.WithStepName("DataCollectionStep"))
+	opts1 := utils.GetStepOpts()
+	opts1 = append(opts1, dbos.WithStepName(buildStepName(params.Level, steps.DataCollectionStepName)))
 	output1, err := dbos.RunAsStep(dbosCtx, steps.DataCollectionStep, opts1...)
 	if err != nil {
 		fmt.Printf("MainWorkflowPhase1: DataCollectionStep: error %+v\n", err)
@@ -151,8 +105,8 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 	}
 	results.OutputDataCollection = output1
 
-	opts2 := opts
-	opts2 = append(opts2, dbos.WithStepName("EvidencesCollectionStep"))
+	opts2 := utils.GetStepOpts()
+	opts2 = append(opts2, dbos.WithStepName(buildStepName(params.Level, steps.EvidencesCollectionStepName)))
 	output2, err := dbos.RunAsStep(dbosCtx, steps.EvidencesCollectionStep, opts2...)
 	if err != nil {
 		fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep: error %+v\n", err)
@@ -161,41 +115,33 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, paramsPhase1 requests.Workflow
 	results.OutputEvidencesCollection = output2
 
 	fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
-
 	return *results, nil
 }
 
-func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, paramsPhase2 requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
+func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
 	// inject params into the context so that steps can access it
-	dbosCtx = dbosCtx.WithValue("paramsPhase2", paramsPhase2)
-
-	fmt.Printf("MainWorkflowPhase2 paramsPhase2: %+v\n", paramsPhase2)
-	opts := utils.GetStepOpts()
-
-	runAllSteps := paramsPhase2.Step.RunAllSteps()
-	dbosCtx = dbosCtx.WithValue("pepModuleEnabled", runAllSteps || paramsPhase2.Step == constants.RUN_STEP_PEP_MODULE)
-	dbosCtx = dbosCtx.WithValue("sanctionsModuleEnabled", runAllSteps || paramsPhase2.Step == constants.RUN_STEP_SANCTIONS_MODULE)
+	dbosCtx = dbosCtx.WithValue(steps.Phase2Params, params)
+	// fmt.Printf("MainWorkflowPhase2 params: %+v\n", params)
 	results := &responses.WorkflowResultPhase2{}
 
-	opts1 := opts
-	opts1 = append(opts1, dbos.WithStepName("PepModuleStep"))
-	output1, err := dbos.RunAsStep(dbosCtx, steps.PepModuleStep, opts1...)
+	opts1 := utils.GetStepOpts()
+	opts1 = append(opts1, dbos.WithStepName(buildStepName(params.Level, steps.PepStepName)))
+	output1, err := dbos.RunAsStep(dbosCtx, steps.PepStep, opts1...)
 	if err != nil {
-		fmt.Printf("MainWorkflow: PepModuleStep: error %+v\n", err)
+		fmt.Printf("MainWorkflow: PepStep: error %+v\n", err)
 		return responses.WorkflowResultPhase2{}, err
 	}
-	results.OutputPepModule = output1
+	results.OutputPep = output1
 
-	opts2 := opts
-	opts2 = append(opts2, dbos.WithStepName("SanctionsModuleStep"))
-	output2, err := dbos.RunAsStep(dbosCtx, steps.SanctionsModuleStep, opts2...)
+	opts2 := utils.GetStepOpts()
+	opts2 = append(opts2, dbos.WithStepName(buildStepName(params.Level, steps.SanctionsStepName)))
+	output2, err := dbos.RunAsStep(dbosCtx, steps.SanctionsStep, opts2...)
 	if err != nil {
-		fmt.Printf("MainWorkflow: SanctionsModuleStep: error %+v\n", err)
+		fmt.Printf("MainWorkflow: SanctionsStep: error %+v\n", err)
 		return responses.WorkflowResultPhase2{}, err
 	}
-	results.OutputSanctionsModule = output2
+	results.OutputSanctions = output2
 
 	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
-
 	return *results, nil
 }

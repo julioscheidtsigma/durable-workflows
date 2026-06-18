@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	UseWorkflowChildren = false
 	// queue controls
 	QueueWorkerConcurrency = 10
 	QueueRateLimiterLimit  = 100
+	// fields
+	EnqueuedStatus = "ENQUEUED"
 )
 
 type WorkflowItem struct {
@@ -68,12 +69,12 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		name := query.Get("name")
-		step := steps.ParseStepFromQuery(query.Get("step"))
-		fmt.Printf("StartWorkflowHandler: step %+v\n", step)
+		runStep := steps.ParseRunStep(query.Get("runStep"))
+		fmt.Printf("StartWorkflowHandler: runStep %+v\n", runStep)
 
 		params := requests.WorkflowParams{
-			Name: name,
-			Step: step,
+			Name:    name,
+			RunStep: runStep,
 		}
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		// workflowID := params.IdempotencyKey()
@@ -86,11 +87,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 		opts = append(opts, dbos.WithPortableWorkflow()) // marks the workflow to use JSON format for all serialized data
 		opts = append(opts, dbos.WithWorkflowID(workflowID))
 
-		if UseWorkflowChildren {
-			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflowChildren, params, opts...)
-		} else {
-			_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
-		}
+		_, err = dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "StartWorkflowHandler: workflow started with error %+v\n", err)
@@ -98,7 +95,8 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 		}
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "StartWorkflowHandler: workflow triggered successfully")
+		result := responses.WorkflowUUIDResult{UUID: workflowID}
+		fmt.Fprint(w, string(result.ToJSON()))
 	}
 }
 
@@ -110,15 +108,18 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 
 		query := r.URL.Query()
 		name := query.Get("name")
-		step := steps.ParseStepFromQuery(query.Get("step"))
+		runStep := steps.ParseRunStep(query.Get("runStep"))
 
 		originalWorkflow := models.Workflow{}
-		fetchQuery := `SELECT
-			workflow_uuid, status, name, inputs, output,
-			queue_name, serialization, rate_limited, application_version
+		fetchQuery := `
+			SELECT
+				workflow_uuid, status, name, inputs, 
+				output, queue_name, serialization,
+				rate_limited, application_version
 			FROM dbos.workflow_status
 			WHERE workflow_uuid = $1
-			LIMIT 1`
+			LIMIT 1
+		`
 		_ = conn.QueryRow(dbosCtx, fetchQuery, originalWorkflowID).Scan(
 			&originalWorkflow.WorkflowUUID,
 			&originalWorkflow.Status,
@@ -139,10 +140,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		if name != "" {
 			paramsWrapper := requests.WorkflowParamsWrapper{
 				PositionalArgs: []requests.WorkflowParams{
-					{
-						Name: name,
-						Step: step,
-					},
+					{Name: name, RunStep: runStep},
 				},
 				NamedArgs: map[string]any{},
 			}
@@ -150,21 +148,25 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			fmt.Printf("new input: %+v\n", inputs)
 		}
 
-		insertQuery := `INSERT INTO dbos.workflow_status (
-			workflow_uuid, status, name, application_version,
-			queue_name, inputs, created_at, updated_at,
-			recovery_attempts, forked_from, was_forked_from,
-			serialization, rate_limited
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+		insertQuery := `
+			INSERT INTO dbos.workflow_status (
+				workflow_uuid, status, name, application_version,
+				queue_name, inputs, created_at, updated_at,
+				recovery_attempts, forked_from, was_forked_from,
+				serialization, rate_limited
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		`
 
 		// the idempotency key will be used as workflow id, stored as workflow_uuid into dbos.workflow_status
 		forkedWorkflowID := uuid.New().String()
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
 		// copy the original workflow
+		// we used the dbosCtx.ForkWorkflow(ctx, dbos.ForkWorkflowInput) method as base to copy an existing workflow
 		_, errFork := conn.Exec(dbosCtx, insertQuery,
 			forkedWorkflowID,
-			"ENQUEUED", // status
+			EnqueuedStatus, // status enqueued
 			originalWorkflow.Name,
 			originalWorkflow.ApplicationVersion,
 			originalWorkflow.Queue,
@@ -183,8 +185,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			return
 		}
 
-		// TODO: check SKIPPED steps
-
+		// SKIPPED steps will also be copied
 		copyOutputsQuery := `INSERT INTO dbos.operation_outputs
 			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
 			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization
@@ -197,22 +198,10 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			return
 		}
 
-		// handle, err := dbosCtx.ForkWorkflow(dbosCtx, dbos.ForkWorkflowInput{
-		// 	OriginalWorkflowID: workflowID,
-		// 	ForkedWorkflowID:   forkedWorkflowID,
-		// 	QueueName:          workflows.QueueName,
-		// 	StartStep:          uint(startStep),
-		// })
-		// if err != nil {
-		// 	w.WriteHeader(http.StatusInternalServerError)
-		// 	fmt.Fprintf(w, "ForkWorkflowHandler: error forking workflow %+v\n", err)
-		// 	return
-		// }
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// result, _ := json.Marshal(handle)
-		// fmt.Fprint(w, string(result))
+		result := responses.WorkflowUUIDResult{UUID: forkedWorkflowID}
+		fmt.Fprint(w, string(result.ToJSON()))
 	}
 }
 
@@ -302,7 +291,7 @@ func main() {
 
 	// Register workflows
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow, dbos.WithWorkflowName("MainWorkflow"))
-	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren, dbos.WithWorkflowName("MainWorkflowChildren"))
+	// dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowChildren, dbos.WithWorkflowName("MainWorkflowChildren"))
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase1, dbos.WithWorkflowName("MainWorkflowPhase1"))
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflowPhase2, dbos.WithWorkflowName("MainWorkflowPhase2"))
 

@@ -31,20 +31,20 @@ Examples to call the API and execute the workflows:
 
 ```bash
 # This will enqueue the workflow, execute all steps (`step=0`), and just return the workflow was triggered
-curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&step=0"
+curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=0"
 # StartWorkflowHandler: workflow triggered successfully
 
 # This will enqueue the workflow, and execute only the second step
-curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&step=2"
+curl -s -X GET "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=2"
 # StartWorkflowHandler: workflow triggered successfully
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific step - changing the inputs
-curl -s -X GET "http://localhost:8585/workflow/fork/6848511e-b64b-4728-90da-30916f8d5818/start/3?name=Volodymyr%20Zelenskyy&step=4"
+curl -s -X GET "http://localhost:8585/workflow/fork/aaa474d2-8be7-4788-9f7e-c5f4083baca7/start/3?name=Volodymyr%20Zelenskyy&runStep=4"
 
-curl -s -X GET "http://localhost:8585/workflow/fork/9ac7e328-80c8-424d-b0e0-bb437509763d/start/0"
+curl -s -X GET "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
 
 
 # change failure probability
