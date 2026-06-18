@@ -124,6 +124,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		forkedWorkflowID := uuid.New().String()
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
+		// using dbosCtx.ForkWorkflow(ctx, dbos.ForkWorkflowInput) method as base to copy an existing workflow
 		errInsert := db.InsertWorkflow(dbosCtx, conn, forkedWorkflowID, inputs, originalWorkflow)
 		if errInsert != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))

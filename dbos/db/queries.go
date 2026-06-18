@@ -23,8 +23,7 @@ func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs stri
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
-	// copy the original workflow
-	// using dbosCtx.ForkWorkflow(ctx, dbos.ForkWorkflowInput) method as base to copy an existing workflow
+	nowUnix := time.Now().UnixMilli()
 	_, errInsert := conn.Exec(ctx, query,
 		workflowID,
 		EnqueuedStatus, // status enqueued
@@ -32,8 +31,8 @@ func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs stri
 		originalWorkflow.ApplicationVersion,
 		originalWorkflow.Queue,
 		inputs,                         // encoded
-		time.Now().UnixMilli(),         // created_at
-		time.Now().UnixMilli(),         // updated_at
+		nowUnix,                        // created_at
+		nowUnix,                        // updated_at
 		0,                              // recovery_attempts
 		originalWorkflow.WorkflowUUID,  // forked_from
 		true,                           // was_forked_from
