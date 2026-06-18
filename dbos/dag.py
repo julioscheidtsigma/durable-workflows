@@ -46,11 +46,11 @@ def get_detailed_levels(graph):
 
 if __name__ in '__main__':
   dag = {
-    'MainWorkflow': ['Phase1'],
-    'Phase1': ['DataCollectionStep', 'EvidencesCollectionStep'],
-    'DataCollectionStep': ['Phase2'],
-    'EvidencesCollectionStep': ['Phase2'],
-    'Phase2': ['PepStep', 'SanctionsStep'],
+    'MainWorkflow': ['Level1'],
+    'Level1': ['DataCollectionStep', 'EvidencesCollectionStep'],
+    'DataCollectionStep': ['Level2'],
+    'EvidencesCollectionStep': ['Level2'],
+    'Level2': ['PepStep', 'SanctionsStep'],
     'PepStep': [],
     'SanctionsStep': [],
   }
@@ -64,13 +64,13 @@ if __name__ in '__main__':
       "node": "MainWorkflow",
       "parents": [],
       "children": [
-        "Phase1"
+        "Level1"
       ]
     }
   ],
   "Level 1": [
     {
-      "node": "Phase1",
+      "node": "Level1",
       "parents": [
         "MainWorkflow"
       ],
@@ -84,25 +84,25 @@ if __name__ in '__main__':
     {
       "node": "DataCollectionStep",
       "parents": [
-        "Phase1"
+        "Level1"
       ],
       "children": [
-        "Phase2"
+        "Level2"
       ]
     },
     {
       "node": "EvidencesCollectionStep",
       "parents": [
-        "Phase1"
+        "Level1"
       ],
       "children": [
-        "Phase2"
+        "Level2"
       ]
     }
   ],
   "Level 3": [
     {
-      "node": "Phase2",
+      "node": "Level2",
       "parents": [
         "DataCollectionStep",
         "EvidencesCollectionStep"
@@ -117,14 +117,14 @@ if __name__ in '__main__':
     {
       "node": "PepStep",
       "parents": [
-        "Phase2"
+        "Level2"
       ],
       "children": []
     },
     {
       "node": "SanctionsStep",
       "parents": [
-        "Phase2"
+        "Level2"
       ],
       "children": []
     }

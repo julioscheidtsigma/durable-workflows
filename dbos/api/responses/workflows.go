@@ -3,13 +3,13 @@ package responses
 import "encoding/json"
 
 type WorkflowResultPhase1 struct {
-	OutputDataCollection      StepResult `json:"outputDataCollection"`
-	OutputEvidencesCollection StepResult `json:"outputEvidencesCollection"`
+	OutputDataCollection      ModuleResult `json:"outputDataCollection"`
+	OutputEvidencesCollection ModuleResult `json:"outputEvidencesCollection"`
 }
 
 type WorkflowResultPhase2 struct {
-	OutputPep       StepResult `json:"outputPep"`
-	OutputSanctions StepResult `json:"outputSanctions"`
+	OutputPep       ModuleResult `json:"outputPep"`
+	OutputSanctions ModuleResult `json:"outputSanctions"`
 }
 
 type WorkflowResult struct {
@@ -31,9 +31,9 @@ func (w WorkflowUUIDResult) ToJSON() string {
 	return string(result)
 }
 
-type StepResult struct {
-	StepName string `json:"stepName"`
-	Level    int    `json:"level,omitempty"`
-	Output   string `json:"output,omitempty"`
-	Status   string `json:"status"`
+type ModuleResult struct {
+	ModuleName string `json:"moduleName"`
+	Level      int    `json:"level,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Status     string `json:"status"`
 }

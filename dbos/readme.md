@@ -30,19 +30,19 @@ go run main.go
 Examples to call the API and execute the workflows:
 
 ```bash
-# This will enqueue the workflow, execute all steps (`step=0`), and just return the workflow was triggered
-curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=0"
+# This will enqueue the workflow, and execute all modules
+curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runModules=0"
 
-# This will enqueue the workflow, and execute only the second step
-curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runStep=2"
+# This will enqueue the workflow, and execute only the second module
+curl -s -X POST "http://localhost:8585/workflow/start?name=Donald%20Trump&runModules=2"
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
-# fork a workflow at specific step - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/fork/afe52ad2-21fc-4d99-9f6b-8beff294038a/start/3?name=Volodymyr%20Zelenskyy&runStep=0"
+# fork a workflow at specific module - changing the inputs
+curl -s -X POST "http://localhost:8585/workflow/fork/83dd4da1-8520-474b-a617-e35be21d15b5/start/0?name=Volodymyr%20Zelenskyy&runModules=0"
 
-# fork a workflow at specific step - same input - failed workflows
+# fork a workflow at specific module - same input - failed workflows
 curl -s -X POST "http://localhost:8585/workflow/fork/cfa9fd8b-a795-4708-be01-37891bd767ca/start/0"
 
 

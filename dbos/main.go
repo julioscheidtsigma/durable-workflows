@@ -13,13 +13,13 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
-	"github.com/julioscheidtsigma/dbos/constants"
-	"github.com/julioscheidtsigma/dbos/models"
-	"github.com/julioscheidtsigma/dbos/requests"
-	"github.com/julioscheidtsigma/dbos/responses"
-	"github.com/julioscheidtsigma/dbos/steps"
-	"github.com/julioscheidtsigma/dbos/utils"
-	"github.com/julioscheidtsigma/dbos/workflows"
+	"github.com/julioscheidtsigma/dbos/api/requests"
+	"github.com/julioscheidtsigma/dbos/api/responses"
+	"github.com/julioscheidtsigma/dbos/pkg/constants"
+	"github.com/julioscheidtsigma/dbos/pkg/models"
+	"github.com/julioscheidtsigma/dbos/pkg/modules"
+	"github.com/julioscheidtsigma/dbos/pkg/utils"
+	"github.com/julioscheidtsigma/dbos/pkg/workflows"
 )
 
 const (
@@ -72,14 +72,13 @@ func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
 
 func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		r := c.Request()
-		name := r.URL.Query().Get("name")
-		runStep := steps.ParseRunStep(r.URL.Query().Get("runStep"))
-		fmt.Printf("StartWorkflowHandler: runStep %+v\n", runStep)
+		query := c.QueryParams()
+		runModules := modules.ParseRunModule(query.Get("runModules"))
+		fmt.Printf("StartWorkflowHandler: runModules %+v\n", runModules)
 
 		params := requests.WorkflowParams{
-			Name:    name,
-			RunStep: runStep,
+			Name:       query.Get("name"),
+			RunModules: runModules,
 		}
 		workflowID := uuid.New().String()
 		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
@@ -98,14 +97,14 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		originalWorkflowID := c.Param("uuid")
-		startStep, errParse := strconv.ParseUint(c.Param("startStep"), 10, 64)
+		step, errParse := strconv.ParseUint(c.Param("step"), 10, 64)
 		if errParse != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing startStep parameter"))
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing step parameter"))
 		}
-		fmt.Printf("ForkWorkflowHandler: startStep %+v\n", startStep)
+		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
 
 		name := c.QueryParam("name")
-		runStep := steps.ParseRunStep(c.QueryParam("runStep"))
+		runModules := modules.ParseRunModule(c.QueryParam("runModules"))
 
 		originalWorkflow := models.Workflow{}
 		fetchQuery := `
@@ -138,7 +137,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 
 		// prepare the new input for the forked workflow
 		if name != "" {
-			paramsWrapper := requests.NewWorkflowParamsWrapper(name, runStep)
+			paramsWrapper := requests.NewWorkflowParamsWrapper(name, runModules)
 			inputs = paramsWrapper.ToJSON()
 			fmt.Printf("new input: %+v\n", inputs)
 		}
@@ -178,13 +177,13 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
-		// SKIPPED steps will also be copied
+		// SKIPPED modules will also be copied
 		copyOutputsQuery := `INSERT INTO dbos.operation_outputs
 			(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
 			SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization
 			FROM dbos.operation_outputs
 			WHERE workflow_uuid = $2 AND function_id < $3`
-		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, originalWorkflowID, startStep)
+		_, errCopy := conn.Exec(dbosCtx, copyOutputsQuery, forkedWorkflowID, originalWorkflowID, step)
 		if errCopy != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
@@ -217,9 +216,12 @@ func ChangeFailureProbabilityHandler() echo.HandlerFunc {
 		probStr := c.QueryParam("probability")
 		prob, err := strconv.ParseFloat(probStr, 64)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("invalid probability value"))
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("invalid probability value, must be between 0.0 and 1.0"))
 		}
-		utils.ChangeFailureProbability(prob)
+		err = utils.SetFailureProbability(prob)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse(err.Error()))
+		}
 		return c.JSON(http.StatusOK, map[string]string{"message": "failure probability updated"})
 	}
 }
@@ -293,7 +295,7 @@ func main() {
 
 	e := echo.New()
 	e.POST("/workflow/start", StartWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.POST("/workflow/fork/:uuid/start/:startStep", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow/fork/:uuid/start/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
 	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
 	e.POST("/failure", ChangeFailureProbabilityHandler())
 	e.POST("/crash", CrashHandler())
