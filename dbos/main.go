@@ -132,12 +132,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 
 		// prepare the new input for the forked workflow
 		if name != "" {
-			paramsWrapper := requests.WorkflowParamsWrapper{
-				PositionalArgs: []requests.WorkflowParams{
-					{Name: name, RunStep: runStep},
-				},
-				NamedArgs: map[string]any{},
-			}
+			paramsWrapper := requests.NewWorkflowParamsWrapper(name, runStep)
 			inputs = paramsWrapper.ToJSON()
 			fmt.Printf("new input: %+v\n", inputs)
 		}

@@ -15,6 +15,15 @@ type WorkflowParamsWrapper struct {
 	NamedArgs      map[string]any   `json:"namedArgs"`
 }
 
+func NewWorkflowParamsWrapper(name string, runStep constants.Step) WorkflowParamsWrapper {
+	return WorkflowParamsWrapper{
+		PositionalArgs: []WorkflowParams{
+			{Name: name, RunStep: runStep},
+		},
+		NamedArgs: map[string]any{},
+	}
+}
+
 func (p WorkflowParamsWrapper) ToJSON() string {
 	result, _ := json.Marshal(p)
 	return string(result)
