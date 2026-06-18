@@ -26,8 +26,6 @@ const (
 	// queue controls
 	QueueWorkerConcurrency = 10
 	QueueRateLimiterLimit  = 100
-	// fields
-	EnqueuedStatus = "ENQUEUED"
 )
 
 func buildErrorResponse(message string) map[string]string {
@@ -159,6 +157,24 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 	}
 }
 
+func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		// TODO: implement this handler to return the workflow execution graph for a given workflow ID
+		workflowID := c.Param("uuid")
+		fmt.Printf("GetWorkflowExecutionGraphHandler: workflowID %+v\n", workflowID)
+
+		steps, err := db.GetWorkflowStepsWithLevels(dbosCtx, conn, workflowID)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching workflow steps"))
+		}
+		for _, step := range steps {
+			fmt.Printf("step %+v\n", step)
+		}
+
+		return c.JSON(http.StatusOK, nil)
+	}
+}
+
 func ChangeFailureProbabilityHandler() echo.HandlerFunc {
 	return func(c echo.Context) error {
 		probStr := c.QueryParam("probability")
@@ -205,7 +221,6 @@ func main() {
 	}
 
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
-	// Initialize a DBOS context
 	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{
 		DatabaseURL:     dbURL,
 		AppName:         "edd",
@@ -216,9 +231,8 @@ func main() {
 		fmt.Printf("Error creating DBOS: %s\n", errInit)
 	}
 
-	// Register workflows
 	dbos.RegisterWorkflow(dbosCtx, workflows.MainWorkflow, dbos.WithWorkflowName("MainWorkflow"))
-	// Create a queue
+
 	rateLimiter := &dbos.RateLimiter{
 		Limit:  QueueRateLimiterLimit,
 		Period: 60 * time.Second,
@@ -228,24 +242,23 @@ func main() {
 		dbos.WithRateLimiter(rateLimiter),
 		dbos.WithPriorityEnabled(),
 		dbos.WithQueueBasePollingInterval(1*time.Second),
-		dbos.WithQueueMaxPollingInterval(60*time.Second),
+		dbos.WithQueueMaxPollingInterval(120*time.Second),
 	)
 
-	// Launch DBOS
 	errLaunch := dbos.Launch(dbosCtx)
 	if errLaunch != nil {
 		fmt.Printf("Error launching DBOS: %s\n", errLaunch)
 	}
-	// Shutdown gracefully shuts down the DBOS runtime
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 
 	e := echo.New()
-	e.POST("/workflow/start", StartWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.POST("/workflow/fork/:uuid/step/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow", StartWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow/:uuid/fork/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
 	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
-	e.POST("/failure", ChangeFailureProbabilityHandler())
+	e.GET("/workflow/:uuid/graph", GetWorkflowExecutionGraphHandler(dbosCtx, conn, eddQueue))
+	e.POST("/failure/injection", ChangeFailureProbabilityHandler())
 	e.POST("/crash", CrashHandler())
 
 	errListen := e.Start(":8585")

@@ -37,7 +37,7 @@ def get_detailed_levels(graph):
       # Gather connections for this specific node
       node_info = {
         "node": node,
-        "parents": sorted(parents_map[node]),  # Who points to me
+        # "parents": sorted(parents_map[node]),  # Who points to me
         "children": sorted(graph[node])        # Who I point to
       }
       level_nodes_info.append(node_info)
@@ -48,9 +48,9 @@ if __name__ in '__main__':
   dag = {
     'MainWorkflow': ['Level1'],
     'Level1': ['DataCollectionStep', 'EvidencesCollectionStep'],
-    'DataCollectionStep': ['Level2'],
-    'EvidencesCollectionStep': ['Level2'],
-    'Level2': ['PepStep', 'SanctionsStep'],
+    'DataCollectionStep': ['Level3'],
+    'EvidencesCollectionStep': ['Level3'],
+    'Level3': ['PepStep', 'SanctionsStep'],
     'PepStep': [],
     'SanctionsStep': [],
   }
@@ -62,7 +62,6 @@ if __name__ in '__main__':
   "Level 0": [
     {
       "node": "MainWorkflow",
-      "parents": [],
       "children": [
         "Level1"
       ]
@@ -71,9 +70,6 @@ if __name__ in '__main__':
   "Level 1": [
     {
       "node": "Level1",
-      "parents": [
-        "MainWorkflow"
-      ],
       "children": [
         "DataCollectionStep",
         "EvidencesCollectionStep"
@@ -83,30 +79,20 @@ if __name__ in '__main__':
   "Level 2": [
     {
       "node": "DataCollectionStep",
-      "parents": [
-        "Level1"
-      ],
       "children": [
-        "Level2"
+        "Level3"
       ]
     },
     {
       "node": "EvidencesCollectionStep",
-      "parents": [
-        "Level1"
-      ],
       "children": [
-        "Level2"
+        "Level3"
       ]
     }
   ],
   "Level 3": [
     {
-      "node": "Level2",
-      "parents": [
-        "DataCollectionStep",
-        "EvidencesCollectionStep"
-      ],
+      "node": "Level3",
       "children": [
         "PepStep",
         "SanctionsStep"
@@ -116,16 +102,10 @@ if __name__ in '__main__':
   "Level 4": [
     {
       "node": "PepStep",
-      "parents": [
-        "Level2"
-      ],
       "children": []
     },
     {
       "node": "SanctionsStep",
-      "parents": [
-        "Level2"
-      ],
       "children": []
     }
   ]
