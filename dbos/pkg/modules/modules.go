@@ -9,8 +9,11 @@ import (
 	"github.com/julioscheidtsigma/dbos/pkg/utils"
 )
 
+var (
+	executionDelay = 10 * time.Second
+)
+
 const (
-	ExecutionDelay = 10 * time.Second
 	// modules
 	DataCollectionModuleName      = "DataCollectionModule"
 	EvidencesCollectionModuleName = "EvidencesCollectionModule"
@@ -39,7 +42,7 @@ func GenericWorkflowModule(ctx context.Context, output responses.ModuleResult) (
 		newOutput.Output = err.Error()
 		return newOutput, err
 	}
-	time.Sleep(ExecutionDelay)
+	time.Sleep(executionDelay)
 	return output, nil
 }
 

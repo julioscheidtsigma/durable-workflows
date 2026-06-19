@@ -16,7 +16,7 @@ var (
 	retryBackoffFactor = 2.0
 	retryInterval      = 1 * time.Second
 	// inject failures randomly based on this probability, protected by a lock to allow concurrent access and modification
-	failureProbability     = 0.0 // from 0.0 to 1.0, set to 0.0 to disable failure, can be changed to test retries
+	failureProbability     = 0.25 // from 0.0 to 1.0, set to 0.0 to disable failure, can be changed to test retries
 	failureProbabilityLock = sync.RWMutex{}
 )
 
