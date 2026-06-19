@@ -17,7 +17,7 @@ import (
 	"github.com/julioscheidtsigma/dbos/api/responses"
 	"github.com/julioscheidtsigma/dbos/db"
 	"github.com/julioscheidtsigma/dbos/pkg/constants"
-	"github.com/julioscheidtsigma/dbos/pkg/modules"
+	"github.com/julioscheidtsigma/dbos/pkg/models"
 	"github.com/julioscheidtsigma/dbos/pkg/utils"
 	"github.com/julioscheidtsigma/dbos/pkg/workflows"
 )
@@ -70,13 +70,21 @@ func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
 
 func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		query := c.QueryParams()
-		runModules := modules.ParseRunModule(query.Get("runModules"))
-		fmt.Printf("StartWorkflowHandler: runModules %+v\n", runModules)
+		var req requests.WorkflowRequest
+		if err := c.Bind(&req); err != nil {
+			fmt.Printf("StartWorkflowHandler: error binding request: %v\n", err)
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("invalid payload"))
+		}
+		if err := req.Validate(); err != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse(err.Error()))
+		}
+		if req.Name == nil || req.RunModules == nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("name and runModules are required"))
+		}
 
 		params := requests.WorkflowParams{
-			Name:       query.Get("name"),
-			RunModules: runModules,
+			Name:       *req.Name,
+			RunModules: constants.ParseRunModule(*req.RunModules),
 		}
 		workflowID := uuid.New().String()
 		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
@@ -84,7 +92,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 		opts := utils.GetWorkflowOpts(workflowID)
 		_, err := dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("error starting workflow"))
+			return c.JSON(http.StatusInternalServerError, buildErrorResponse("error starting workflow"))
 		}
 
 		result := responses.WorkflowUUIDResult{UUID: workflowID}
@@ -95,28 +103,33 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		originalWorkflowID := c.Param("uuid")
-		step, errParse := strconv.ParseInt(c.Param("step"), 10, 64)
+		forkStep, errParse := strconv.ParseInt(c.Param("forkStep"), 10, 64)
 		if errParse != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing step parameter"))
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing fork step parameter"))
 		}
 		fmt.Printf("ForkWorkflowHandler: originalWorkflowID %+v\n", originalWorkflowID)
-		fmt.Printf("ForkWorkflowHandler: step %+v\n", step)
+		fmt.Printf("ForkWorkflowHandler: forkStep %+v\n", forkStep)
 
 		originalWorkflow, errScan := db.GetWorkflow(dbosCtx, conn, originalWorkflowID)
 		if errScan != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
 		}
 
-		name := c.QueryParam("name")
-		runModules := modules.ParseRunModule(c.QueryParam("runModules"))
+		var req requests.WorkflowRequest
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("invalid payload"))
+		}
+		if err := req.Validate(); err != nil {
+			return c.JSON(http.StatusBadRequest, buildErrorResponse(err.Error()))
+		}
 
 		inputs := originalWorkflow.Inputs
-		fmt.Printf("old input: %+v\n", inputs)
+		fmt.Printf("ForkWorkflowHandler: old input: %+v\n", inputs)
 		// prepare the new input for the forked workflow
-		if name != "" {
-			paramsWrapper := requests.NewWorkflowParamsWrapper(name, runModules)
+		if req.Name != nil && req.RunModules != nil {
+			paramsWrapper := requests.NewWorkflowParamsWrapper(*req.Name, constants.ParseRunModule(*req.RunModules))
 			inputs = paramsWrapper.ToJSON()
-			fmt.Printf("new input: %+v\n", inputs)
+			fmt.Printf("ForkWorkflowHandler: new input: %+v\n", inputs)
 		}
 
 		forkedWorkflowID := uuid.New().String()
@@ -129,7 +142,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		}
 
 		// SKIPPED modules will also be copied
-		errCopy := db.CopyWorkflowOutputs(dbosCtx, conn, forkedWorkflowID, originalWorkflowID, step)
+		errCopy := db.CopyWorkflowOutputs(dbosCtx, conn, forkedWorkflowID, originalWorkflowID, forkStep)
 		if errCopy != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
@@ -159,7 +172,6 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 
 func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		// TODO: implement this handler to return the workflow execution graph for a given workflow ID
 		workflowID := c.Param("uuid")
 		fmt.Printf("GetWorkflowExecutionGraphHandler: workflowID %+v\n", workflowID)
 
@@ -167,11 +179,38 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, 
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching workflow steps"))
 		}
+
+		stepsByLevelMap := make(map[int][]models.WorkflowNode)
 		for _, step := range steps {
-			fmt.Printf("step %+v\n", step)
+			name := step.StepName
+			if name == workflows.StartLevelName {
+				name = fmt.Sprintf("%s%d", workflows.LevelPrefix, step.GlobalLevel)
+			}
+			stepsByLevelMap[step.GlobalLevel] = append(stepsByLevelMap[step.GlobalLevel], models.WorkflowNode{
+				Node:     name,
+				Children: []string{},
+			})
 		}
 
-		return c.JSON(http.StatusOK, nil)
+		for level, stepsByLevel := range stepsByLevelMap {
+			// their children will be the next level if available
+			children, exists := stepsByLevelMap[level+1]
+			childrenWithLevel := make([]string, 0)
+			if exists {
+				for _, child := range children {
+					childrenWithLevel = append(childrenWithLevel, child.Node)
+				}
+			}
+			for idx, step := range stepsByLevel {
+				if exists {
+					newStep := step
+					newStep.Children = childrenWithLevel
+					stepsByLevelMap[level][idx] = newStep
+				}
+			}
+		}
+
+		return c.JSON(http.StatusOK, stepsByLevelMap)
 	}
 }
 
@@ -255,7 +294,7 @@ func main() {
 
 	e := echo.New()
 	e.POST("/workflow", StartWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.POST("/workflow/:uuid/fork/:step", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow/:uuid/fork/:forkStep", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
 	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
 	e.GET("/workflow/:uuid/graph", GetWorkflowExecutionGraphHandler(dbosCtx, conn, eddQueue))
 	e.POST("/failure/injection", ChangeFailureProbabilityHandler())

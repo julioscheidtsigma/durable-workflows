@@ -41,71 +41,62 @@ def get_detailed_levels(graph):
         "children": sorted(graph[node])        # Who I point to
       }
       level_nodes_info.append(node_info)
-    structured_levels[f"Level {level_idx}"] = level_nodes_info
+    structured_levels[f"{level_idx+1}"] = level_nodes_info
   return structured_levels
 
 if __name__ in '__main__':
   dag = {
-    'MainWorkflow': ['Level1'],
-    'Level1': ['DataCollectionStep', 'EvidencesCollectionStep'],
-    'DataCollectionStep': ['Level3'],
-    'EvidencesCollectionStep': ['Level3'],
-    'Level3': ['PepStep', 'SanctionsStep'],
-    'PepStep': [],
-    'SanctionsStep': [],
+    'Level1': ['DataCollectionModule', 'EvidencesCollectionModule'],
+    'DataCollectionModule': ['Level3'],
+    'EvidencesCollectionModule': ['Level3'],
+    'Level3': ['PepModule', 'SanctionsModule'],
+    'PepModule': [],
+    'SanctionsModule': [],
   }
   level_structure = get_detailed_levels(dag)
   print(json.dumps(level_structure, indent=2))
 
 """
 {
-  "Level 0": [
-    {
-      "node": "MainWorkflow",
-      "children": [
-        "Level1"
-      ]
-    }
-  ],
-  "Level 1": [
+  "1": [
     {
       "node": "Level1",
       "children": [
-        "DataCollectionStep",
-        "EvidencesCollectionStep"
+        "DataCollectionModule",
+        "EvidencesCollectionModule"
       ]
     }
   ],
-  "Level 2": [
+  "2": [
     {
-      "node": "DataCollectionStep",
+      "node": "DataCollectionModule",
       "children": [
         "Level3"
       ]
     },
     {
-      "node": "EvidencesCollectionStep",
+      "node": "EvidencesCollectionModule",
       "children": [
         "Level3"
       ]
     }
   ],
-  "Level 3": [
+  "3": [
     {
       "node": "Level3",
       "children": [
-        "PepStep",
-        "SanctionsStep"
+        "PepModule",
+        "SanctionsModule"
       ]
     }
   ],
-  "Level 4": [
+  "4": [
     {
-      "node": "PepStep",
+      "node": "PepModule",
       "children": []
     },
     {
-      "node": "SanctionsStep",
+      "node": "SanctionsModule",
       "children": []
     }
   ]

@@ -31,20 +31,26 @@ Examples to call the API and execute the workflows:
 
 ```bash
 # This will enqueue the workflow, and execute all modules
-curl -s -X POST "http://localhost:8585/workflow?name=Donald%20Trump&runModules=0"
+curl -s -X POST "http://localhost:8585/workflow" \
+  -H 'content-type: application/json' \
+  --data-raw '{"name": "Donald Trump", "runModules": 0}'
 # This will enqueue the workflow, and execute only the second module
-curl -s -X POST "http://localhost:8585/workflow?name=Donald%20Trump&runModules=2"
+curl -s -X POST "http://localhost:8585/workflow" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"name": "Donald Trump", "runModules": 2}'
 
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific module - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/b1cad946-c478-4f00-a487-f6c2a66dd7b0/fork/3?name=Volodymyr%20Zelenskyy&runModules=0"
+curl -s -X POST "http://localhost:8585/workflow/82975adc-4bc2-469c-ad31-f6ea7bc880e9/fork/3" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
 # fork a workflow at specific module - same input - failed workflows
-curl -s -X POST "http://localhost:8585/workflow/9f6c67fe-30db-4b0b-be6d-f8b8879567e4/fork/0"
+curl -s -X POST "http://localhost:8585/workflow/09b54468-4e34-4cd3-a55b-7dd7b8b314c7/fork/0"
 
 # get exeuction graph
-curl -s -X GET "http://localhost:8585/workflow/61fde7a0-96ce-47eb-a0b2-e4be50d12576/graph"
+curl -s -X GET "http://localhost:8585/workflow/82975adc-4bc2-469c-ad31-f6ea7bc880e9/graph"
 
 # change failure probability
 curl -s -X POST "http://localhost:8585/failure/injection?probability=0.0"

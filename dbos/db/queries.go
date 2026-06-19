@@ -64,7 +64,7 @@ func GetWorkflow(ctx context.Context, conn *pgx.Conn, workflowID string) (models
 		WHERE workflow_uuid = $1
 		LIMIT 1
 	`
-	workflow := models.Workflow{}
+	var workflow = models.Workflow{}
 	row := conn.QueryRow(ctx, query, workflowID)
 	err := row.Scan(
 		&workflow.WorkflowUUID,
@@ -85,6 +85,7 @@ func GetWorkflowStepsWithLevels(ctx context.Context, conn *pgx.Conn, workflowID 
 		SELECT
 			oo.workflow_uuid,
 			oo.function_name,
+			(string_to_array(replace(oo.function_name, 'Level:', ''), ':'))[2]::text as step_name,
 			(string_to_array(replace(oo.function_name, 'Level:', ''), ':'))[1]::int AS global_level,
 			oo.function_id AS local_level,
 			oo.output::json ->> 'status' AS status,
@@ -101,10 +102,10 @@ func GetWorkflowStepsWithLevels(ctx context.Context, conn *pgx.Conn, workflowID 
 		FROM dbos.operation_outputs oo
 		JOIN dbos.workflow_status ws on ws.workflow_uuid = oo.workflow_uuid
 		WHERE oo.workflow_uuid = $1
-		ORDER BY global_level DESC, oo.started_at_epoch_ms DESC
+		ORDER BY global_level ASC, oo.started_at_epoch_ms ASC
 		LIMIT 100
 	`
-	steps := []models.WorkflowStepWithLevel{}
+	var steps = []models.WorkflowStepWithLevel{}
 	rows, err := conn.Query(ctx, query, workflowID)
 	if err != nil {
 		return nil, err
@@ -115,6 +116,7 @@ func GetWorkflowStepsWithLevels(ctx context.Context, conn *pgx.Conn, workflowID 
 		err := rows.Scan(
 			&step.WorkflowUUID,
 			&step.FunctionName,
+			&step.StepName,
 			&step.GlobalLevel,
 			&step.LocalLevel,
 			&step.Status,

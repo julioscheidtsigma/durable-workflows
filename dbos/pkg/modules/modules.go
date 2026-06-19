@@ -6,7 +6,6 @@ import (
 
 	"github.com/julioscheidtsigma/dbos/api/requests"
 	"github.com/julioscheidtsigma/dbos/api/responses"
-	"github.com/julioscheidtsigma/dbos/pkg/constants"
 	"github.com/julioscheidtsigma/dbos/pkg/utils"
 )
 
@@ -24,24 +23,6 @@ const (
 	Phase1Params = "paramsPhase1"
 	Phase2Params = "paramsPhase2"
 )
-
-func ParseRunModule(moduleStr string) constants.Module {
-	module := constants.RUN_MODULES_ALL // default to run all modules
-	switch moduleStr {
-	case "0":
-		module = constants.RUN_MODULES_ALL
-	case "1":
-		module = constants.RUN_MODULES_DATA_COLLECTION
-	case "2":
-		module = constants.RUN_MODULES_EVIDENCES_COLLECTION
-	case "3":
-		module = constants.RUN_MODULES_PEP
-	case "4":
-		module = constants.RUN_MODULES_SANCTIONS
-	default:
-	}
-	return module
-}
 
 func PlaceholderModule(ctx context.Context) (any, error) {
 	return nil, nil

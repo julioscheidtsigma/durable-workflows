@@ -2,12 +2,28 @@ package requests
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/julioscheidtsigma/dbos/api/responses"
 	"github.com/julioscheidtsigma/dbos/pkg/constants"
 )
+
+type WorkflowRequest struct {
+	Name       *string `json:"name"`
+	RunModules *int    `json:"runModules"` // optional param to control which module to run, default is 0 which means run all modules
+}
+
+func (p *WorkflowRequest) Validate() error {
+	if p.Name != nil && *p.Name == "" {
+		return errors.New("name is required")
+	}
+	if p.RunModules != nil && (*p.RunModules < 0 || *p.RunModules > 4) {
+		return errors.New("runModules must be between 0 and 4")
+	}
+	return nil
+}
 
 // {"positionalArgs":[{"name":"string","runModules":int}],"namedArgs":{}}
 type WorkflowParamsWrapper struct {
@@ -34,16 +50,16 @@ type WorkflowParams struct {
 	RunModules constants.Module `json:"runModules"` // optional param to control which module to run, default is 0 which means run all modules
 }
 
+func (p WorkflowParams) ToJSON() string {
+	result, _ := json.Marshal(p)
+	return string(result)
+}
+
 func (p WorkflowParams) IdempotencyKey() string {
 	hash := xxhash.New()
 	_, _ = hash.WriteString(p.Name)
 	_, _ = hash.WriteString(strconv.Itoa(int(p.RunModules)))
 	return strconv.FormatUint(hash.Sum64(), 10)
-}
-
-func (p WorkflowParams) ToJSON() string {
-	result, _ := json.Marshal(p)
-	return string(result)
 }
 
 type WorkflowParamsPhase1 struct {

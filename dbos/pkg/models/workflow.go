@@ -17,6 +17,7 @@ type Workflow struct {
 type WorkflowStepWithLevel struct {
 	WorkflowUUID string     `json:"workflow_uuid"`
 	FunctionName string     `json:"function_name"`
+	StepName     string     `json:"step_name"`
 	GlobalLevel  int        `json:"global_level"`
 	LocalLevel   int        `json:"local_level"`
 	Status       *string    `json:"status"`
@@ -24,4 +25,9 @@ type WorkflowStepWithLevel struct {
 	Inputs       string     `json:"inputs"`
 	StartedAt    *time.Time `json:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at"`
+}
+
+type WorkflowNode struct {
+	Node     string   `json:"node"`
+	Children []string `json:"children"`
 }
