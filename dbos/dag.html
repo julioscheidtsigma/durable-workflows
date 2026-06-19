@@ -61,8 +61,8 @@
   
   <div id="chart-wrap" class="chart-wrap" style="display:none">
     <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:10px;color:#888">
-      <button onclick="removeInterval()" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;margin-left:32px;">
-        Stop refreshing
+      <button onclick="toggleAutoRefresh()" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;margin-left:32px;">
+        Toggle Auto-Refresh
       </button>
     </div>  
     
@@ -71,7 +71,7 @@
 </div>
 
 <script>
-let data = {
+let dummyData = {
   "0": [
     { node: "Level0", children: ["DataCollectionModule","EvidencesCollectionModule"], skipped: false, failed: false },
   ],
@@ -93,6 +93,7 @@ let data = {
     { node: "SynthesisModule", children: [], skipped: false, failed: false },
   ]
 };
+let data = null;
 let interval = null;
 
 const COLORS = {
@@ -224,8 +225,16 @@ async function init() {
     render();
     window.addEventListener("resize", render);
   } catch (err) {
-    showState("error", err.message);
-    removeInterval();
+    console.error("Failed to fetch graph data:", err);
+    if (!data) {
+      showState("error", err.message);
+    } else {
+      showState("chart-wrap");
+    }
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
   }
 }
 
@@ -237,19 +246,24 @@ function showState(state, msg = "") {
   if (msg) document.getElementById("error-msg").textContent = msg;
 }
 
-function removeInterval() {
+function startInterval(delaySeconds = 3000) {
+  interval = setInterval(() => {
+    console.log("Checking for updates...");
+    init();
+  }, delaySeconds);
+}
+
+function toggleAutoRefresh() {
   if (interval) {
     clearInterval(interval);
     interval = null;
+  } else {
+    startInterval();
   }
 }
 
 init();
-
-interval = setInterval(() => {
-  console.log("Checking for updates...");
-  init();
-}, 3000);
+startInterval();
 </script>
 </body>
 </html>
