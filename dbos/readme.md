@@ -43,11 +43,11 @@ curl -s -X POST "http://localhost:8585/workflow" \
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific module - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/ec2e3088-00a4-431c-9ce4-7b2d6ebdf3ef/fork/3" \
+curl -s -X POST "http://localhost:8585/workflow/ac129ada-930c-49d0-b75d-17632a59397a/fork/3" \
   -H 'Content-Type: application/json' \
   --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
 # fork a workflow at specific module - same input - failed workflows
-curl -s -X POST "http://localhost:8585/workflow/fc3d7531-7d45-4742-adf8-d1ad57995d55/fork/0"
+curl -s -X POST "http://localhost:8585/workflow/248d7ea1-921d-48ea-9334-55847b0d3c64/fork/3"
 
 # get exeuction graph
 curl -s -X GET "http://localhost:8585/workflow/ec2e3088-00a4-431c-9ce4-7b2d6ebdf3ef/graph"
@@ -60,6 +60,11 @@ curl -s -X POST "http://localhost:8585/failure/injection?probability=1.0"
 # crash testing
 curl -s -X POST "http://localhost:8585/crash"
 ```
+
+### UI
+
+Access the UI at to view the execution graph:
+[http://localhost/dag.html?uuid=<WORKFLOW_UUID>](http://localhost/dag.html?uuid=<WORKFLOW_UUID>)
 
 #### Docs
 

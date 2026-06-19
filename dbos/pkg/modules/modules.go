@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	ExecutionDelay = 10 * time.Second
 	// modules
 	DataCollectionModuleName      = "DataCollectionModule"
 	EvidencesCollectionModuleName = "EvidencesCollectionModule"
@@ -38,7 +39,7 @@ func GenericWorkflowModule(ctx context.Context, output responses.ModuleResult) (
 		newOutput.Output = err.Error()
 		return newOutput, err
 	}
-	time.Sleep(10 * time.Second)
+	time.Sleep(ExecutionDelay)
 	return output, nil
 }
 

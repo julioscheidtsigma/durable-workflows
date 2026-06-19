@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
@@ -188,7 +189,7 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, 
 			stepsByLevelMap[step.GlobalLevel] = append(stepsByLevelMap[step.GlobalLevel], models.WorkflowNode{
 				Node:     name,
 				Children: []string{},
-				Disabled: skipped,
+				Skipped:  skipped,
 				Failed:   failed,
 			})
 		}
@@ -300,6 +301,13 @@ func main() {
 	e.GET("/workflow/:uuid/graph", GetWorkflowExecutionGraphHandler(dbosCtx, conn, eddQueue))
 	e.POST("/failure/injection", ChangeFailureProbabilityHandler())
 	e.POST("/crash", CrashHandler())
+
+	// allow Access-Control-Allow-Origin
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
+	}))
 
 	errListen := e.Start(":8585")
 	if errListen != nil {
