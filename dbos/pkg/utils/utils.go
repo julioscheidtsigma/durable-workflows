@@ -20,7 +20,7 @@ var (
 	failureProbabilityLock = sync.RWMutex{}
 )
 
-func GetModuleOpts() []dbos.StepOption {
+func BuildModuleOpts() []dbos.StepOption {
 	opts := []dbos.StepOption{}
 	opts = append(opts, dbos.WithStepMaxRetries(retryLimit))
 	opts = append(opts, dbos.WithBackoffFactor(retryBackoffFactor))
@@ -28,7 +28,7 @@ func GetModuleOpts() []dbos.StepOption {
 	return opts
 }
 
-func GetWorkflowOpts(workflowID string) []dbos.WorkflowOption {
+func BuildWorkflowOpts(workflowID string) []dbos.WorkflowOption {
 	opts := []dbos.WorkflowOption{}
 	opts = append(opts, dbos.WithQueue(constants.QueueName))
 	opts = append(opts, dbos.WithPortableWorkflow()) // marks the workflow to use JSON format for all serialized data

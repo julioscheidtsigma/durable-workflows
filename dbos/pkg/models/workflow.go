@@ -30,4 +30,5 @@ type WorkflowStepWithLevel struct {
 type WorkflowNode struct {
 	Node     string   `json:"node"`
 	Children []string `json:"children"`
+	Disabled bool     `json:"disabled"`
 }

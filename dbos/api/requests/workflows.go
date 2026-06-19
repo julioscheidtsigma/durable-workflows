@@ -19,7 +19,7 @@ func (p *WorkflowRequest) Validate() error {
 	if p.Name != nil && *p.Name == "" {
 		return errors.New("name is required")
 	}
-	if p.RunModules != nil && (*p.RunModules < 0 || *p.RunModules > 4) {
+	if p.RunModules != nil && (*p.RunModules < 0 || *p.RunModules > 5) {
 		return errors.New("runModules must be between 0 and 4")
 	}
 	return nil
@@ -74,4 +74,13 @@ type WorkflowParamsPhase2 struct {
 	RunModules constants.Module `json:"runModules"`
 	// this will receive the outputs from phase 1
 	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
+}
+
+type WorkflowParamsPhase3 struct {
+	Level      int              `json:"level"`
+	Name       string           `json:"name"`
+	RunModules constants.Module `json:"runModules"`
+	// this will receive the outputs from phase 1 and phase 2
+	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
+	Phase2 responses.WorkflowResultPhase2 `json:"outputPhase2"`
 }

@@ -12,9 +12,14 @@ type WorkflowResultPhase2 struct {
 	OutputSanctions ModuleResult `json:"outputSanctions"`
 }
 
+type WorkflowResultPhase3 struct {
+	OutputSynthesis ModuleResult `json:"outputSynthesis"`
+}
+
 type WorkflowResult struct {
 	WorkflowResultPhase1
 	WorkflowResultPhase2
+	WorkflowResultPhase3
 }
 
 func (w WorkflowResult) ToJSON() string {

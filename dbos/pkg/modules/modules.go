@@ -15,13 +15,15 @@ const (
 	EvidencesCollectionModuleName = "EvidencesCollectionModule"
 	PepModuleName                 = "PepModule"
 	SanctionsModuleName           = "SanctionsModule"
+	SynthesisModuleName           = "SynthesisModule"
 	// statuses
 	SkippedModule  = "SKIPPED"
 	ExecutedModule = "EXECUTED"
 	FailedModule   = "FAILED"
 	// params
-	Phase1Params = "paramsPhase1"
-	Phase2Params = "paramsPhase2"
+	ParamsPhase1 = "paramsPhase1"
+	ParamsPhase2 = "paramsPhase2"
+	ParamsPhase3 = "paramsPhase3"
 )
 
 func PlaceholderModule(ctx context.Context) (any, error) {
@@ -42,7 +44,7 @@ func GenericWorkflowModule(ctx context.Context, output responses.ModuleResult) (
 
 // phase 1
 func DataCollectionModule(ctx context.Context) (responses.ModuleResult, error) {
-	params := ctx.Value(Phase1Params).(requests.WorkflowParamsPhase1)
+	params := ctx.Value(ParamsPhase1).(requests.WorkflowParamsPhase1)
 	response := responses.ModuleResult{
 		ModuleName: DataCollectionModuleName,
 		Level:      params.Level,
@@ -59,7 +61,7 @@ func DataCollectionModule(ctx context.Context) (responses.ModuleResult, error) {
 }
 
 func EvidencesCollectionModule(ctx context.Context) (responses.ModuleResult, error) {
-	params := ctx.Value(Phase1Params).(requests.WorkflowParamsPhase1)
+	params := ctx.Value(ParamsPhase1).(requests.WorkflowParamsPhase1)
 	response := responses.ModuleResult{
 		ModuleName: EvidencesCollectionModuleName,
 		Level:      params.Level,
@@ -77,7 +79,7 @@ func EvidencesCollectionModule(ctx context.Context) (responses.ModuleResult, err
 
 // phase 2
 func PepModule(ctx context.Context) (responses.ModuleResult, error) {
-	params := ctx.Value(Phase2Params).(requests.WorkflowParamsPhase2)
+	params := ctx.Value(ParamsPhase2).(requests.WorkflowParamsPhase2)
 	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
 	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
 	response := responses.ModuleResult{
@@ -96,7 +98,7 @@ func PepModule(ctx context.Context) (responses.ModuleResult, error) {
 }
 
 func SanctionsModule(ctx context.Context) (responses.ModuleResult, error) {
-	params := ctx.Value(Phase2Params).(requests.WorkflowParamsPhase2)
+	params := ctx.Value(ParamsPhase2).(requests.WorkflowParamsPhase2)
 	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
 	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
 	response := responses.ModuleResult{
@@ -107,6 +109,29 @@ func SanctionsModule(ctx context.Context) (responses.ModuleResult, error) {
 	}
 	sanctionsEnabled := ctx.Value("sanctionsEnabled").(bool)
 	if !sanctionsEnabled {
+		response.Status = SkippedModule
+		response.Output = ""
+		return response, nil
+	}
+	return GenericWorkflowModule(ctx, response)
+}
+
+// phase 3
+func SynthesisModule(ctx context.Context) (responses.ModuleResult, error) {
+	params := ctx.Value(ParamsPhase3).(requests.WorkflowParamsPhase3)
+	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
+	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
+	resultPhase2PepName := params.Phase2.OutputPep.Output
+	resultPhase2SanctionsName := params.Phase2.OutputSanctions.Output
+	response := responses.ModuleResult{
+		ModuleName: SanctionsModuleName,
+		Level:      params.Level,
+		Output: params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName +
+			" - Pep: " + resultPhase2PepName + " - Sanctions: " + resultPhase2SanctionsName,
+		Status: ExecutedModule,
+	}
+	synthesisEnabled := ctx.Value("synthesisEnabled").(bool)
+	if !synthesisEnabled {
 		response.Status = SkippedModule
 		response.Output = ""
 		return response, nil

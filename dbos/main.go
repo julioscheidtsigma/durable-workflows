@@ -18,6 +18,7 @@ import (
 	"github.com/julioscheidtsigma/dbos/db"
 	"github.com/julioscheidtsigma/dbos/pkg/constants"
 	"github.com/julioscheidtsigma/dbos/pkg/models"
+	"github.com/julioscheidtsigma/dbos/pkg/modules"
 	"github.com/julioscheidtsigma/dbos/pkg/utils"
 	"github.com/julioscheidtsigma/dbos/pkg/workflows"
 )
@@ -87,9 +88,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 			RunModules: constants.ParseRunModule(*req.RunModules),
 		}
 		workflowID := uuid.New().String()
-		fmt.Printf("StartWorkflowHandler: workflowID %+v\n", workflowID)
-
-		opts := utils.GetWorkflowOpts(workflowID)
+		opts := utils.BuildWorkflowOpts(workflowID)
 		_, err := dbos.RunWorkflow(dbosCtx, workflows.MainWorkflow, params, opts...)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, buildErrorResponse("error starting workflow"))
@@ -173,8 +172,6 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		workflowID := c.Param("uuid")
-		fmt.Printf("GetWorkflowExecutionGraphHandler: workflowID %+v\n", workflowID)
-
 		steps, err := db.GetWorkflowStepsWithLevels(dbosCtx, conn, workflowID)
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching workflow steps"))
@@ -186,9 +183,11 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, 
 			if name == workflows.StartLevelName {
 				name = fmt.Sprintf("%s%d", workflows.LevelPrefix, step.GlobalLevel)
 			}
+			skipped := step.Status != nil && *step.Status == modules.SkippedModule
 			stepsByLevelMap[step.GlobalLevel] = append(stepsByLevelMap[step.GlobalLevel], models.WorkflowNode{
 				Node:     name,
 				Children: []string{},
+				Disabled: skipped,
 			})
 		}
 
@@ -246,7 +245,7 @@ func CollectWorkflowResults(resultsChan chan responses.WorkflowResult) {
 }
 
 func main() {
-	user := "root"
+	user := "root" // TODO: get from env variable or config
 	pass := "local"
 	host := "localhost"
 	port := 5432

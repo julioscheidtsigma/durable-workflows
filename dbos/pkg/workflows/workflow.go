@@ -14,7 +14,7 @@ import (
 const (
 	LevelPrefix    = "Level"
 	StartLevelName = "Start"
-	StartLevel     = 1
+	StartLevel     = 0
 )
 
 var QueueResultsChan = make(chan responses.WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
@@ -33,6 +33,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAll || params.RunModules == constants.RUN_MODULES_EVIDENCES_COLLECTION)
 	dbosCtx = dbosCtx.WithValue("pepEnabled", runAll || params.RunModules == constants.RUN_MODULES_PEP)
 	dbosCtx = dbosCtx.WithValue("sanctionsEnabled", runAll || params.RunModules == constants.RUN_MODULES_SANCTIONS)
+	dbosCtx = dbosCtx.WithValue("synthesisEnabled", runAll || params.RunModules == constants.RUN_MODULES_SYNTHESIS)
 
 	// start at level 1
 	currentLevel := StartLevel
@@ -69,9 +70,29 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 		Level:      currentLevel,
 		Name:       params.Name,
 		RunModules: params.RunModules,
-		Phase1:     resultPhase1, // injecting results from a previous phase
+		Phase1:     resultPhase1, // injecting results from previous phases
 	}
 	resultPhase2, err := MainWorkflowPhase2(dbosCtx, paramsPhase2)
+	if err != nil {
+		return responses.WorkflowResult{}, err
+	}
+
+	currentLevel++ // 5
+	_, errPhase3 := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
+		dbos.WithStepName(buildModuleName(currentLevel, StartLevelName)))
+	if errPhase3 != nil {
+		return responses.WorkflowResult{}, errPhase3
+	}
+
+	currentLevel++ // 6
+	paramsPhase3 := requests.WorkflowParamsPhase3{
+		Level:      currentLevel,
+		Name:       params.Name,
+		RunModules: params.RunModules,
+		Phase1:     resultPhase1, // injecting results from previous phases
+		Phase2:     resultPhase2,
+	}
+	resultPhase3, err := MainWorkflowPhase3(dbosCtx, paramsPhase3)
 	if err != nil {
 		return responses.WorkflowResult{}, err
 	}
@@ -79,6 +100,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	results := responses.WorkflowResult{
 		WorkflowResultPhase1: resultPhase1,
 		WorkflowResultPhase2: resultPhase2,
+		WorkflowResultPhase3: resultPhase3,
 	}
 
 	// send results to a channel to be consumed by another goroutine
@@ -89,23 +111,21 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 
 func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
 	// inject params into the context so that modules can access it
-	dbosCtx = dbosCtx.WithValue(modules.Phase1Params, params)
+	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase1, params)
 	results := &responses.WorkflowResultPhase1{}
 
-	opts1 := utils.GetModuleOpts()
+	opts1 := utils.BuildModuleOpts()
 	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.DataCollectionModuleName)))
 	output1, err := dbos.RunAsStep(dbosCtx, modules.DataCollectionModule, opts1...)
 	if err != nil {
-		fmt.Printf("MainWorkflowPhase1: DataCollectionStep: error %+v\n", err)
 		return responses.WorkflowResultPhase1{}, err
 	}
 	results.OutputDataCollection = output1
 
-	opts2 := utils.GetModuleOpts()
+	opts2 := utils.BuildModuleOpts()
 	opts2 = append(opts2, dbos.WithStepName(buildModuleName(params.Level, modules.EvidencesCollectionModuleName)))
 	output2, err := dbos.RunAsStep(dbosCtx, modules.EvidencesCollectionModule, opts2...)
 	if err != nil {
-		fmt.Printf("MainWorkflowPhase1: EvidencesCollectionStep: error %+v\n", err)
 		return responses.WorkflowResultPhase1{}, err
 	}
 	results.OutputEvidencesCollection = output2
@@ -116,27 +136,42 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 
 func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
 	// inject params into the context so that modules can access it
-	dbosCtx = dbosCtx.WithValue(modules.Phase2Params, params)
+	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase2, params)
 	results := &responses.WorkflowResultPhase2{}
 
-	opts1 := utils.GetModuleOpts()
+	opts1 := utils.BuildModuleOpts()
 	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.PepModuleName)))
 	output1, err := dbos.RunAsStep(dbosCtx, modules.PepModule, opts1...)
 	if err != nil {
-		fmt.Printf("MainWorkflow: PepStep: error %+v\n", err)
 		return responses.WorkflowResultPhase2{}, err
 	}
 	results.OutputPep = output1
 
-	opts2 := utils.GetModuleOpts()
+	opts2 := utils.BuildModuleOpts()
 	opts2 = append(opts2, dbos.WithStepName(buildModuleName(params.Level, modules.SanctionsModuleName)))
 	output2, err := dbos.RunAsStep(dbosCtx, modules.SanctionsModule, opts2...)
 	if err != nil {
-		fmt.Printf("MainWorkflow: SanctionsStep: error %+v\n", err)
 		return responses.WorkflowResultPhase2{}, err
 	}
 	results.OutputSanctions = output2
 
 	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
+	return *results, nil
+}
+
+func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params requests.WorkflowParamsPhase3) (responses.WorkflowResultPhase3, error) {
+	// inject params into the context so that modules can access it
+	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase3, params)
+	results := &responses.WorkflowResultPhase3{}
+
+	opts1 := utils.BuildModuleOpts()
+	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.SynthesisModuleName)))
+	output1, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts1...)
+	if err != nil {
+		return responses.WorkflowResultPhase3{}, err
+	}
+	results.OutputSynthesis = output1
+
+	fmt.Printf("MainWorkflowPhase3: results %+v\n", results)
 	return *results, nil
 }
