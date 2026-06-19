@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	// fields
-	EnqueuedStatus = "ENQUEUED"
+	WorkflowStatusEnqueued = "ENQUEUED"
 )
 
 func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs string, originalWorkflow models.Workflow) error {
@@ -26,7 +25,7 @@ func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs stri
 	nowUnix := time.Now().UnixMilli()
 	_, err := conn.Exec(ctx, query,
 		workflowID,
-		EnqueuedStatus, // status enqueued
+		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
 		originalWorkflow.ApplicationVersion,
 		originalWorkflow.Queue,

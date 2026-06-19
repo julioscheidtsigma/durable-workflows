@@ -31,4 +31,5 @@ type WorkflowNode struct {
 	Node     string   `json:"node"`
 	Children []string `json:"children"`
 	Disabled bool     `json:"disabled"`
+	Failed   bool     `json:"failed"`
 }

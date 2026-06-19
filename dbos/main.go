@@ -184,10 +184,12 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, 
 				name = fmt.Sprintf("%s%d", workflows.LevelPrefix, step.GlobalLevel)
 			}
 			skipped := step.Status != nil && *step.Status == modules.SkippedModule
+			failed := step.Status != nil && *step.Status == modules.FailedModule
 			stepsByLevelMap[step.GlobalLevel] = append(stepsByLevelMap[step.GlobalLevel], models.WorkflowNode{
 				Node:     name,
 				Children: []string{},
 				Disabled: skipped,
+				Failed:   failed,
 			})
 		}
 
