@@ -230,6 +230,7 @@ async function init() {
       showState("error", err.message);
     } else {
       showState("chart-wrap");
+      render();
     }
     if (interval) {
       clearInterval(interval);
