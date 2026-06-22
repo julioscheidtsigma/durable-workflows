@@ -26,7 +26,7 @@ import (
 
 const (
 	// queue controls
-	QueueWorkerConcurrency = 10
+	QueueWorkerConcurrency = 10 // this will make the worker pick up to 10 workflows concurrently
 	QueueRateLimiterLimit  = 100
 )
 

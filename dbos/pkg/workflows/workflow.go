@@ -35,7 +35,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 	dbosCtx = dbosCtx.WithValue("sanctionsEnabled", runAll || params.RunModules == constants.RUN_MODULES_SANCTIONS)
 	dbosCtx = dbosCtx.WithValue("synthesisEnabled", runAll || params.RunModules == constants.RUN_MODULES_SYNTHESIS)
 
-	// start at level 1
+	// start at level 0
 	currentLevel := StartLevel
 
 	// running placehold modules between phases to help in the workflow execution graph
@@ -45,7 +45,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 		return responses.WorkflowResult{}, errPhase1
 	}
 
-	currentLevel++ // 2
+	currentLevel++ // 1
 	paramsPhase1 := requests.WorkflowParamsPhase1{
 		Level:      currentLevel,
 		Name:       params.Name,
@@ -58,14 +58,14 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 		return responses.WorkflowResult{}, err
 	}
 
-	currentLevel++ // 3
+	currentLevel++ // 2
 	_, errPhase2 := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
 		dbos.WithStepName(buildModuleName(currentLevel, StartLevelName)))
 	if errPhase2 != nil {
 		return responses.WorkflowResult{}, errPhase2
 	}
 
-	currentLevel++ // 4
+	currentLevel++ // 3
 	paramsPhase2 := requests.WorkflowParamsPhase2{
 		Level:      currentLevel,
 		Name:       params.Name,
@@ -77,14 +77,14 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowParams) (res
 		return responses.WorkflowResult{}, err
 	}
 
-	currentLevel++ // 5
+	currentLevel++ // 4
 	_, errPhase3 := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
 		dbos.WithStepName(buildModuleName(currentLevel, StartLevelName)))
 	if errPhase3 != nil {
 		return responses.WorkflowResult{}, errPhase3
 	}
 
-	currentLevel++ // 6
+	currentLevel++ // 5
 	paramsPhase3 := requests.WorkflowParamsPhase3{
 		Level:      currentLevel,
 		Name:       params.Name,

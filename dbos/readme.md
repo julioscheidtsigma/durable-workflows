@@ -39,6 +39,13 @@ curl -s -X POST "http://localhost:8585/workflow" \
   -H 'Content-Type: application/json' \
   --data-raw '{"name": "Donald Trump", "runModules": 1}'
 
+# multiple requests
+for i in {1..10}; do
+  curl -s -X POST "http://localhost:8585/workflow" \
+    -H 'content-type: application/json' \
+    --data-raw '{"name": "Donald Trump", "runModules": 0}' &
+done
+
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
