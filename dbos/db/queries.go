@@ -10,6 +10,8 @@ import (
 
 const (
 	WorkflowStatusEnqueued = "ENQUEUED"
+	WorkflowStatusError    = "ERROR"
+	WorkflowStatusSucess   = "SUCCESS"
 )
 
 type Database struct {
@@ -52,7 +54,7 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
-		originalWorkflow.ApplicationVersion,
+		nil, // application_version - originalWorkflow.ApplicationVersion
 		originalWorkflow.Queue,
 		inputs,                         // encoded
 		nowUnix,                        // created_at
@@ -129,7 +131,7 @@ func (db *Database) GetWorkflowStepsWithLevels(ctx context.Context, workflowID s
 		FROM dbos.operation_outputs oo
 		JOIN dbos.workflow_status ws on ws.workflow_uuid = oo.workflow_uuid
 		WHERE oo.workflow_uuid = $1
-		ORDER BY global_level ASC, oo.started_at_epoch_ms ASC
+		ORDER BY global_level ASC, local_level ASC
 		LIMIT 100
 	`
 	var steps = []models.WorkflowStepWithLevel{}

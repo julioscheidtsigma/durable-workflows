@@ -28,7 +28,7 @@ func (w WorkflowResult) ToJSON() string {
 }
 
 type WorkflowUUIDResult struct {
-	UUID string `json:"uuid"`
+	WorkflowUUID string `json:"workflowUUID"`
 }
 
 func (w WorkflowUUIDResult) ToJSON() string {
@@ -38,7 +38,6 @@ func (w WorkflowUUIDResult) ToJSON() string {
 
 type ModuleResult struct {
 	ModuleName string `json:"moduleName"`
-	Level      int    `json:"level,omitempty"`
 	Output     string `json:"output,omitempty"`
 	Status     string `json:"status"`
 }

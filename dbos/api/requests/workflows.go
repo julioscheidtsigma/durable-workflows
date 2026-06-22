@@ -27,13 +27,13 @@ func (p *WorkflowRequest) Validate() error {
 
 // {"positionalArgs":[{"name":"string","runModules":int}],"namedArgs":{}}
 type WorkflowParamsWrapper struct {
-	PositionalArgs []WorkflowParams `json:"positionalArgs"`
-	NamedArgs      map[string]any   `json:"namedArgs"`
+	PositionalArgs []WorkflowRequestParams `json:"positionalArgs"`
+	NamedArgs      map[string]any          `json:"namedArgs"`
 }
 
 func NewWorkflowParamsWrapper(name string, runModules constants.Module) WorkflowParamsWrapper {
 	return WorkflowParamsWrapper{
-		PositionalArgs: []WorkflowParams{
+		PositionalArgs: []WorkflowRequestParams{
 			{Name: name, RunModules: runModules},
 		},
 		NamedArgs: map[string]any{},
@@ -45,41 +45,67 @@ func (p WorkflowParamsWrapper) ToJSON() string {
 	return string(result)
 }
 
-type WorkflowParams struct {
+type WorkflowRequestParams struct {
 	Name       string           `json:"name"`
 	RunModules constants.Module `json:"runModules"` // optional param to control which module to run, default is 0 which means run all modules
 }
 
-func (p WorkflowParams) ToJSON() string {
+func (p WorkflowRequestParams) ToJSON() string {
 	result, _ := json.Marshal(p)
 	return string(result)
 }
 
-func (p WorkflowParams) IdempotencyKey() string {
+func (p WorkflowRequestParams) IdempotencyKey() string {
 	hash := xxhash.New()
 	_, _ = hash.WriteString(p.Name)
 	_, _ = hash.WriteString(strconv.Itoa(int(p.RunModules)))
 	return strconv.FormatUint(hash.Sum64(), 10)
 }
 
+type WorkflowState struct {
+	stepID        int
+	globalLevelID int
+}
+
+func (ws *WorkflowState) NextStepID() int {
+	ws.stepID++
+	return ws.stepID
+}
+
+func (ws *WorkflowState) NextGlobalLevel() int {
+	ws.globalLevelID++
+	return ws.globalLevelID
+}
+
+func (ws *WorkflowState) CurrentGlobalLevel() int {
+	return ws.globalLevelID
+}
+
+func NewWorkflowState() *WorkflowState {
+	return &WorkflowState{
+		stepID:        -1,
+		globalLevelID: -1,
+	}
+}
+
+type WorkflowParamsGlobal struct {
+	Name           string           `json:"name"`
+	RunModules     constants.Module `json:"runModules"`
+	*WorkflowState `json:"-"`
+}
+
 type WorkflowParamsPhase1 struct {
-	Level      int              `json:"level"`
-	Name       string           `json:"name"`
-	RunModules constants.Module `json:"runModules"`
+	WorkflowParamsGlobal
 }
 
 type WorkflowParamsPhase2 struct {
-	Level      int              `json:"level"`
-	Name       string           `json:"name"`
-	RunModules constants.Module `json:"runModules"`
+	WorkflowParamsGlobal
 	// this will receive the outputs from phase 1
 	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
 }
 
 type WorkflowParamsPhase3 struct {
-	Level      int              `json:"level"`
-	Name       string           `json:"name"`
-	RunModules constants.Module `json:"runModules"`
+	WorkflowParamsGlobal
 	// this will receive the outputs from phase 1 and phase 2
 	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
 	Phase2 responses.WorkflowResultPhase2 `json:"outputPhase2"`

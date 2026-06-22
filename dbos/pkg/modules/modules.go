@@ -51,7 +51,6 @@ func DataCollectionModule(ctx context.Context) (responses.ModuleResult, error) {
 	params := ctx.Value(ParamsPhase1).(requests.WorkflowParamsPhase1)
 	response := responses.ModuleResult{
 		ModuleName: DataCollectionModuleName,
-		Level:      params.Level,
 		Output:     params.Name,
 		Status:     ExecutedModule,
 	}
@@ -68,7 +67,6 @@ func EvidencesCollectionModule(ctx context.Context) (responses.ModuleResult, err
 	params := ctx.Value(ParamsPhase1).(requests.WorkflowParamsPhase1)
 	response := responses.ModuleResult{
 		ModuleName: EvidencesCollectionModuleName,
-		Level:      params.Level,
 		Output:     params.Name,
 		Status:     ExecutedModule,
 	}
@@ -88,7 +86,6 @@ func PepModule(ctx context.Context) (responses.ModuleResult, error) {
 	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
 	response := responses.ModuleResult{
 		ModuleName: PepModuleName,
-		Level:      params.Level,
 		Output:     params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName,
 		Status:     ExecutedModule,
 	}
@@ -107,7 +104,6 @@ func SanctionsModule(ctx context.Context) (responses.ModuleResult, error) {
 	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
 	response := responses.ModuleResult{
 		ModuleName: SanctionsModuleName,
-		Level:      params.Level,
 		Output:     params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName,
 		Status:     ExecutedModule,
 	}
@@ -129,7 +125,6 @@ func SynthesisModule(ctx context.Context) (responses.ModuleResult, error) {
 	resultPhase2SanctionsName := params.Phase2.OutputSanctions.Output
 	response := responses.ModuleResult{
 		ModuleName: SanctionsModuleName,
-		Level:      params.Level,
 		Output: params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName +
 			" - Pep: " + resultPhase2PepName + " - Sanctions: " + resultPhase2SanctionsName,
 		Status: ExecutedModule,

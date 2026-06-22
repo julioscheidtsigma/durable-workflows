@@ -50,7 +50,7 @@ done
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific module - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/ce85ac8e-d5ff-43ee-85b1-a45e57409606/fork/0" \
+curl -s -X POST "http://localhost:8585/workflow/f8e97ce5-4540-4f20-8b60-7a2f3dd1eedf/fork/3" \
   -H 'Content-Type: application/json' \
   --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
 # fork a workflow at specific module - same input - failed workflows
@@ -71,7 +71,7 @@ curl -s -X POST "http://localhost:8585/crash"
 #### UI
 
 Access the UI at to view the execution graph:
-[http://localhost/dag.html?uuid=<WORKFLOW_UUID>](http://localhost/dag.html?uuid=<WORKFLOW_UUID>)
+[http://localhost/dag.html?workflowUUID=<WORKFLOW_UUID>](http://localhost/dag.html?workflowUUID=<WORKFLOW_UUID>)
 
 #### Docs
 

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Node Flowchart</title>
+
 <style>
   * {
     box-sizing: border-box;
@@ -45,7 +46,7 @@
     transition: opacity .15s;
     white-space: nowrap;
     z-index: 10;
-    min-height: 40px;
+    min-height: 20px;
   }
 </style>
 </head>
@@ -151,6 +152,39 @@ function buildLayout() {
   return { levels, nodePos };
 }
 
+async function onClickNodeForkWorkflow(startStep) {
+  const workflowUUID = getUUIDFromURL();
+  console.log('workflowUUID', workflowUUID);
+  if (!workflowUUID) {
+    showState("message");
+    return;
+  }
+
+  const endpoint = `${baseAPI}/workflow/${workflowUUID}/fork/${startStep}`;
+  showState("loading");
+
+  try {
+    const res = await fetch(endpoint, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+    console.log('data', data);
+
+    if (data['workflowUUID']) {
+      const newUUID = data['workflowUUID'];
+      const newURL = `${window.location.origin}${window.location.pathname}?workflowUUID=${newUUID}`;
+      window.history.pushState({ path: newURL }, '', newURL);
+      // restart auto-refresh for the new workflow
+      restartInterval();
+    }
+    
+  } catch (err) {
+    console.error("Failed to fork workflow:", err);
+    if (!data) {
+      showState("error", err.message);
+    }
+  }
+}
+
 function render() {
   const svg = document.getElementById("chart");
   if (!Object.keys(data).length) return;
@@ -192,7 +226,7 @@ function render() {
 
   // Nodes
   levels.forEach(lvl => {
-    data[lvl].forEach(({ node, skipped, failed, output }) => {
+    data[lvl].forEach(({ node, skipped, failed, output, localLevel, globalLevel }) => {
       let label = node.length > 16 ? node.slice(0, 14) + "…" : node;
 
       const { x, y, w, h } = nodePos[node];
@@ -210,10 +244,14 @@ function render() {
         label = label + " (failed)";
       }
 
+      if (output) {
+        output["localLevel"] = localLevel;
+        output["globalLevel"] = globalLevel;
+      }
       const tipData = output ? JSON.stringify(output) : '{"name": "start"}';
 
       html += `
-        <g class="node-group" data-tip='${tipData}' style="cursor:default">
+        <g class="node-group" data-tip='${tipData}' style="cursor:pointer" onclick="onClickNodeForkWorkflow('${localLevel}')">
           <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"
             fill="${color.fill}" stroke="${color.stroke}" stroke-width="1"/>
           <text x="${x + w / 2}" y="${y + h / 2}" text-anchor="middle" dominant-baseline="central"
@@ -227,6 +265,7 @@ function render() {
 
   // Tooltip logic
   const tip = document.getElementById("tooltip");
+
   svg.querySelectorAll(".node-group").forEach(g => {
     g.addEventListener("mouseenter", e => {
       const d = JSON.parse(g.dataset.tip);
@@ -252,16 +291,20 @@ function render() {
   });
 }
 
-async function init() {
+function getUUIDFromURL() {
   const params = new URLSearchParams(window.location.search);
-  const uuid = params.get("uuid") || null;
-  console.log('uuid', uuid);
-  if (!uuid) {
+  return params.get("workflowUUID") || null;
+}
+
+async function init() {
+  const workflowUUID = getUUIDFromURL();
+  console.log('workflowUUID', workflowUUID);
+  if (!workflowUUID) {
     showState("message");
     return;
   }
 
-  const endpoint = `${baseAPI}/workflow/${uuid}/graph`;
+  const endpoint = `${baseAPI}/workflow/${workflowUUID}/graph`;
   showState("loading");
 
   try {
@@ -269,6 +312,7 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     data = await res.json();
     console.log('data', data);
+
     showState("chart-wrap");
     render();
     window.addEventListener("resize", render);
@@ -302,6 +346,14 @@ function startInterval(delaySeconds = 3000) {
     console.log("Checking for updates...");
     init();
   }, delaySeconds);
+}
+
+function restartInterval(delaySeconds = 3000) {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
+  startInterval(delaySeconds);
 }
 
 function toggleAutoRefresh() {
