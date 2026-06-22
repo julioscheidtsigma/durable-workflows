@@ -12,7 +12,32 @@ const (
 	WorkflowStatusEnqueued = "ENQUEUED"
 )
 
-func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs string, originalWorkflow models.Workflow) error {
+type Database struct {
+	conn *pgx.Conn
+}
+
+func NewDatabase(conn *pgx.Conn) *Database {
+	return &Database{conn: conn}
+}
+
+func (db *Database) BeginTransaction(ctx context.Context) (pgx.Tx, error) {
+	tx, err := db.conn.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	db.conn = tx.Conn()
+	return tx, nil
+}
+
+func (db *Database) CommitTransaction(tx pgx.Tx, ctx context.Context) error {
+	return tx.Commit(ctx)
+}
+
+func (db *Database) RollbackTransaction(tx pgx.Tx, ctx context.Context) error {
+	return tx.Rollback(ctx)
+}
+
+func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs string, originalWorkflow models.Workflow) error {
 	query := `
 		INSERT INTO dbos.workflow_status (
 			workflow_uuid, status, name, application_version,
@@ -23,7 +48,7 @@ func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs stri
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	nowUnix := time.Now().UnixMilli()
-	_, err := conn.Exec(ctx, query,
+	_, err := db.conn.Exec(ctx, query,
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
@@ -41,7 +66,7 @@ func InsertWorkflow(ctx context.Context, conn *pgx.Conn, workflowID, inputs stri
 	return err
 }
 
-func CopyWorkflowOutputs(ctx context.Context, conn *pgx.Conn, workflowID, originalWorkflowID string, step int64) error {
+func (db *Database) CopyWorkflowOutputs(ctx context.Context, workflowID, originalWorkflowID string, step int64) error {
 	query := `
 		INSERT INTO dbos.operation_outputs
 		(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
@@ -49,11 +74,11 @@ func CopyWorkflowOutputs(ctx context.Context, conn *pgx.Conn, workflowID, origin
 		FROM dbos.operation_outputs
 		WHERE workflow_uuid = $2 AND function_id < $3
 	`
-	_, err := conn.Exec(ctx, query, workflowID, originalWorkflowID, step)
+	_, err := db.conn.Exec(ctx, query, workflowID, originalWorkflowID, step)
 	return err
 }
 
-func GetWorkflow(ctx context.Context, conn *pgx.Conn, workflowID string) (models.Workflow, error) {
+func (db *Database) GetWorkflow(ctx context.Context, workflowID string) (models.Workflow, error) {
 	query := `
 		SELECT
 			workflow_uuid, status, name, inputs, 
@@ -64,7 +89,7 @@ func GetWorkflow(ctx context.Context, conn *pgx.Conn, workflowID string) (models
 		LIMIT 1
 	`
 	var workflow = models.Workflow{}
-	row := conn.QueryRow(ctx, query, workflowID)
+	row := db.conn.QueryRow(ctx, query, workflowID)
 	err := row.Scan(
 		&workflow.WorkflowUUID,
 		&workflow.Status,
@@ -76,10 +101,13 @@ func GetWorkflow(ctx context.Context, conn *pgx.Conn, workflowID string) (models
 		&workflow.RateLimited,
 		&workflow.ApplicationVersion,
 	)
+	if workflow.WorkflowUUID == "" {
+		return models.Workflow{}, pgx.ErrNoRows
+	}
 	return workflow, err
 }
 
-func GetWorkflowStepsWithLevels(ctx context.Context, conn *pgx.Conn, workflowID string) ([]models.WorkflowStepWithLevel, error) {
+func (db *Database) GetWorkflowStepsWithLevels(ctx context.Context, workflowID string) ([]models.WorkflowStepWithLevel, error) {
 	query := `
 		SELECT
 			oo.workflow_uuid,
@@ -105,7 +133,7 @@ func GetWorkflowStepsWithLevels(ctx context.Context, conn *pgx.Conn, workflowID 
 		LIMIT 100
 	`
 	var steps = []models.WorkflowStepWithLevel{}
-	rows, err := conn.Query(ctx, query, workflowID)
+	rows, err := db.conn.Query(ctx, query, workflowID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/julioscheidtsigma/dbos/api/responses"
+)
 
 type Workflow struct {
 	WorkflowUUID       string `json:"workflow_uuid"`
@@ -28,8 +32,9 @@ type WorkflowStepWithLevel struct {
 }
 
 type WorkflowNode struct {
-	Node     string   `json:"node"`
-	Children []string `json:"children"`
-	Skipped  bool     `json:"skipped"`
-	Failed   bool     `json:"failed"`
+	Node     string                  `json:"node"`
+	Children []string                `json:"children"`
+	Skipped  bool                    `json:"skipped"`
+	Failed   bool                    `json:"failed"`
+	Output   *responses.ModuleResult `json:"output"`
 }

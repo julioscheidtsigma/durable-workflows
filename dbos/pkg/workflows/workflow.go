@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/julioscheidtsigma/dbos/api/requests"
@@ -18,6 +19,11 @@ const (
 )
 
 var QueueResultsChan = make(chan responses.WorkflowResult, 100) // buffered channel to hold workflow results when run as queue
+
+type ModuleResultWithError struct {
+	responses.ModuleResult
+	err error
+}
 
 func buildModuleName(level int, moduleName string) string {
 	return fmt.Sprintf("%s:%d:%s", LevelPrefix, level, moduleName)
@@ -114,21 +120,42 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase1, params)
 	results := &responses.WorkflowResultPhase1{}
 
-	opts1 := utils.BuildModuleOpts()
-	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.DataCollectionModuleName)))
-	output1, err := dbos.RunAsStep(dbosCtx, modules.DataCollectionModule, opts1...)
-	if err != nil {
-		return responses.WorkflowResultPhase1{}, err
-	}
-	results.OutputDataCollection = output1
+	resultsChan := make(chan ModuleResultWithError, 2) // buffered channel to hold results from modules
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
 
-	opts2 := utils.BuildModuleOpts()
-	opts2 = append(opts2, dbos.WithStepName(buildModuleName(params.Level, modules.EvidencesCollectionModuleName)))
-	output2, err := dbos.RunAsStep(dbosCtx, modules.EvidencesCollectionModule, opts2...)
-	if err != nil {
-		return responses.WorkflowResultPhase1{}, err
+	go func(params requests.WorkflowParamsPhase1) {
+		defer wg.Done()
+		opts := utils.BuildModuleOpts()
+		opts = append(opts, dbos.WithStepName(buildModuleName(params.Level, modules.DataCollectionModuleName)))
+		output, err := dbos.RunAsStep(dbosCtx, modules.DataCollectionModule, opts...)
+		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
+	}(params)
+
+	go func(params requests.WorkflowParamsPhase1) {
+		defer wg.Done()
+		opts := utils.BuildModuleOpts()
+		opts = append(opts, dbos.WithStepName(buildModuleName(params.Level, modules.EvidencesCollectionModuleName)))
+		output, err := dbos.RunAsStep(dbosCtx, modules.EvidencesCollectionModule, opts...)
+		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
+	}(params)
+
+	// wait for all goroutines to finish
+	wg.Wait()
+	close(resultsChan)
+
+	// collect results from the channel
+	for output := range resultsChan {
+		if output.err != nil {
+			return responses.WorkflowResultPhase1{}, output.err
+		}
+		switch output.ModuleName {
+		case modules.DataCollectionModuleName:
+			results.OutputDataCollection = output.ModuleResult
+		case modules.EvidencesCollectionModuleName:
+			results.OutputEvidencesCollection = output.ModuleResult
+		}
 	}
-	results.OutputEvidencesCollection = output2
 
 	fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
 	return *results, nil
@@ -139,21 +166,42 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase2, params)
 	results := &responses.WorkflowResultPhase2{}
 
-	opts1 := utils.BuildModuleOpts()
-	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.PepModuleName)))
-	output1, err := dbos.RunAsStep(dbosCtx, modules.PepModule, opts1...)
-	if err != nil {
-		return responses.WorkflowResultPhase2{}, err
-	}
-	results.OutputPep = output1
+	resultsChan := make(chan ModuleResultWithError, 2) // buffered channel to hold results from modules
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
 
-	opts2 := utils.BuildModuleOpts()
-	opts2 = append(opts2, dbos.WithStepName(buildModuleName(params.Level, modules.SanctionsModuleName)))
-	output2, err := dbos.RunAsStep(dbosCtx, modules.SanctionsModule, opts2...)
-	if err != nil {
-		return responses.WorkflowResultPhase2{}, err
+	go func(params requests.WorkflowParamsPhase2) {
+		defer wg.Done()
+		opts := utils.BuildModuleOpts()
+		opts = append(opts, dbos.WithStepName(buildModuleName(params.Level, modules.PepModuleName)))
+		output, err := dbos.RunAsStep(dbosCtx, modules.PepModule, opts...)
+		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
+	}(params)
+
+	go func(params requests.WorkflowParamsPhase2) {
+		defer wg.Done()
+		opts := utils.BuildModuleOpts()
+		opts = append(opts, dbos.WithStepName(buildModuleName(params.Level, modules.SanctionsModuleName)))
+		output, err := dbos.RunAsStep(dbosCtx, modules.SanctionsModule, opts...)
+		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
+	}(params)
+
+	// wait for all goroutines to finish
+	wg.Wait()
+	close(resultsChan)
+
+	// collect results from the channel
+	for output := range resultsChan {
+		if output.err != nil {
+			return responses.WorkflowResultPhase2{}, output.err
+		}
+		switch output.ModuleName {
+		case modules.PepModuleName:
+			results.OutputPep = output.ModuleResult
+		case modules.SanctionsModuleName:
+			results.OutputSanctions = output.ModuleResult
+		}
 	}
-	results.OutputSanctions = output2
 
 	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
 	return *results, nil
@@ -164,13 +212,13 @@ func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params requests.WorkflowParams
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase3, params)
 	results := &responses.WorkflowResultPhase3{}
 
-	opts1 := utils.BuildModuleOpts()
-	opts1 = append(opts1, dbos.WithStepName(buildModuleName(params.Level, modules.SynthesisModuleName)))
-	output1, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts1...)
+	opts := utils.BuildModuleOpts()
+	opts = append(opts, dbos.WithStepName(buildModuleName(params.Level, modules.SynthesisModuleName)))
+	output, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts...)
 	if err != nil {
 		return responses.WorkflowResultPhase3{}, err
 	}
-	results.OutputSynthesis = output1
+	results.OutputSynthesis = output
 
 	fmt.Printf("MainWorkflowPhase3: results %+v\n", results)
 	return *results, nil

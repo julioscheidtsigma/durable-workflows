@@ -33,11 +33,28 @@
   text {
     font-family: system-ui, sans-serif;
   }
+  #tooltip {
+    position: fixed;
+    background: #1e1e1e;
+    color: #fff;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    white-space: nowrap;
+    z-index: 10;
+    min-height: 40px;
+  }
 </style>
 </head>
 
 <body>
 <div>
+  <div id="tooltip">
+  </div>
+
   <div id="loading" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px;color:#888">
     <svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="none" stroke="#ccc" stroke-width="3"/>
       <path d="M16 4a12 12 0 0 1 12 12" fill="none" stroke="#888" stroke-width="3" stroke-linecap="round">
@@ -175,7 +192,7 @@ function render() {
 
   // Nodes
   levels.forEach(lvl => {
-    data[lvl].forEach(({ node, skipped, failed }) => {
+    data[lvl].forEach(({ node, skipped, failed, output }) => {
       let label = node.length > 16 ? node.slice(0, 14) + "…" : node;
 
       const { x, y, w, h } = nodePos[node];
@@ -193,17 +210,46 @@ function render() {
         label = label + " (failed)";
       }
 
+      const tipData = output ? JSON.stringify(output) : '{"name": "start"}';
+
       html += `
-        <g>
+        <g class="node-group" data-tip='${tipData}' style="cursor:default">
           <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"
             fill="${color.fill}" stroke="${color.stroke}" stroke-width="1"/>
-          <text x="${cx}" y="${y + h/2}" text-anchor="middle" dominant-baseline="central"
+          <text x="${x + w / 2}" y="${y + h / 2}" text-anchor="middle" dominant-baseline="central"
             font-size="13" font-weight="500" fill="${color.text}">${label}</text>
-        </g>`;
+        </g>
+      `;
     });
   });
 
   svg.innerHTML = html;
+
+  // Tooltip logic
+  const tip = document.getElementById("tooltip");
+  svg.querySelectorAll(".node-group").forEach(g => {
+    g.addEventListener("mouseenter", e => {
+      const d = JSON.parse(g.dataset.tip);
+      tip.innerHTML = Object.entries(d).map(([k, v]) =>
+        `<div class="tip-row">
+          <span class="tip-key">
+            ${k}:
+          </span>
+          <span class="tip-val">
+            ${Array.isArray(v) ? v.join(", ") || "—" : v}
+          </span>
+        </div>
+      `).join("");
+      tip.style.opacity = 1;
+    });
+    g.addEventListener("mousemove", e => {
+      tip.style.left = (e.clientX + 14) + "px";
+      tip.style.top  = (e.clientY - 28) + "px";
+    });
+    g.addEventListener("mouseleave", () => {
+      tip.style.opacity = 0;
+    });
+  });
 }
 
 async function init() {
@@ -214,8 +260,10 @@ async function init() {
     showState("message");
     return;
   }
+
   const endpoint = `${baseAPI}/workflow/${uuid}/graph`;
   showState("loading");
+
   try {
     const res = await fetch(endpoint);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -224,6 +272,7 @@ async function init() {
     showState("chart-wrap");
     render();
     window.addEventListener("resize", render);
+
   } catch (err) {
     console.error("Failed to fetch graph data:", err);
     if (!data) {
@@ -232,6 +281,7 @@ async function init() {
       showState("chart-wrap");
       render();
     }
+
     if (interval) {
       clearInterval(interval);
       interval = null;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -70,7 +71,7 @@ func WorkflowItemFromStatus(ws dbos.WorkflowStatus) WorkflowItem {
 	}
 }
 
-func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+func StartWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var req requests.WorkflowRequest
 		if err := c.Bind(&req); err != nil {
@@ -100,7 +101,7 @@ func StartWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 	}
 }
 
-func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		originalWorkflowID := c.Param("uuid")
 		forkStep, errParse := strconv.ParseInt(c.Param("forkStep"), 10, 64)
@@ -110,7 +111,20 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		fmt.Printf("ForkWorkflowHandler: originalWorkflowID %+v\n", originalWorkflowID)
 		fmt.Printf("ForkWorkflowHandler: forkStep %+v\n", forkStep)
 
-		originalWorkflow, errScan := db.GetWorkflow(dbosCtx, conn, originalWorkflowID)
+		ctx := context.Background()
+
+		fmt.Printf("ForkWorkflowHandler: starting transaction\n")
+		tx, err := database.BeginTransaction(ctx)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, buildErrorResponse("error starting database transaction"))
+		}
+
+		defer func() {
+			fmt.Printf("ForkWorkflowHandler: rolling back transaction\n")
+			_ = database.RollbackTransaction(tx, ctx)
+		}()
+
+		originalWorkflow, errScan := database.GetWorkflow(dbosCtx, originalWorkflowID)
 		if errScan != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
 		}
@@ -136,23 +150,26 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.Wo
 		fmt.Printf("ForkWorkflowHandler: forkedWorkflowID %+v\n", forkedWorkflowID)
 
 		// using dbosCtx.ForkWorkflow(ctx, dbos.ForkWorkflowInput) method as base to copy an existing workflow
-		errInsert := db.InsertWorkflow(dbosCtx, conn, forkedWorkflowID, inputs, originalWorkflow)
+		errInsert := database.InsertWorkflow(dbosCtx, forkedWorkflowID, inputs, originalWorkflow)
 		if errInsert != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
 		// SKIPPED modules will also be copied
-		errCopy := db.CopyWorkflowOutputs(dbosCtx, conn, forkedWorkflowID, originalWorkflowID, forkStep)
+		errCopy := database.CopyWorkflowOutputs(dbosCtx, forkedWorkflowID, originalWorkflowID, forkStep)
 		if errCopy != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
+
+		fmt.Printf("ForkWorkflowHandler: committing transaction\n")
+		_ = database.CommitTransaction(tx, ctx)
 
 		result := responses.WorkflowUUIDResult{UUID: forkedWorkflowID}
 		return c.JSON(http.StatusOK, result)
 	}
 }
 
-func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		workflows, err := dbos.ListWorkflows(dbosCtx,
 			dbos.WithQueueName(constants.QueueName),
@@ -170,10 +187,10 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.W
 	}
 }
 
-func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, queue dbos.WorkflowQueue) echo.HandlerFunc {
+func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		workflowID := c.Param("uuid")
-		steps, err := db.GetWorkflowStepsWithLevels(dbosCtx, conn, workflowID)
+		steps, err := database.GetWorkflowStepsWithLevels(dbosCtx, workflowID)
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching workflow steps"))
 		}
@@ -186,11 +203,19 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, conn *pgx.Conn, 
 			}
 			skipped := step.Status != nil && *step.Status == modules.SkippedModule
 			failed := step.Status != nil && *step.Status == modules.FailedModule
+			var output *responses.ModuleResult
+			if step.Output != nil {
+				err := json.Unmarshal([]byte(*step.Output), &output)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, buildErrorResponse("error unmarshaling step output"))
+				}
+			}
 			stepsByLevelMap[step.GlobalLevel] = append(stepsByLevelMap[step.GlobalLevel], models.WorkflowNode{
 				Node:     name,
 				Children: []string{},
 				Skipped:  skipped,
 				Failed:   failed,
+				Output:   output,
 			})
 		}
 
@@ -252,14 +277,15 @@ func main() {
 	pass := "local"
 	host := "localhost"
 	port := 5432
-	database := "argus"
-	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", user, pass, host, port, database)
+	dbName := "argus"
+	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", user, pass, host, port, dbName)
 
 	ctx := context.Background()
 	conn, errConn := pgx.Connect(ctx, dbURL)
 	if errConn != nil {
 		fmt.Printf("Error connecting to database: %s\n", errConn)
 	}
+	database := db.NewDatabase(conn)
 
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{
@@ -295,10 +321,10 @@ func main() {
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 
 	e := echo.New()
-	e.POST("/workflow", StartWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.POST("/workflow/:uuid/fork/:forkStep", ForkWorkflowHandler(dbosCtx, conn, eddQueue))
-	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, conn, eddQueue))
-	e.GET("/workflow/:uuid/graph", GetWorkflowExecutionGraphHandler(dbosCtx, conn, eddQueue))
+	e.POST("/workflow", StartWorkflowHandler(dbosCtx, database, eddQueue))
+	e.POST("/workflow/:uuid/fork/:forkStep", ForkWorkflowHandler(dbosCtx, database, eddQueue))
+	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, database, eddQueue))
+	e.GET("/workflow/:uuid/graph", GetWorkflowExecutionGraphHandler(dbosCtx, database, eddQueue))
 	e.POST("/failure/injection", ChangeFailureProbabilityHandler())
 	e.POST("/crash", CrashHandler())
 
