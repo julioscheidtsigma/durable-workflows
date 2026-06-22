@@ -40,8 +40,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	dbosCtx = dbosCtx.WithValue("sanctionsEnabled", runAll || params.RunModules == constants.RUN_MODULES_SANCTIONS)
 	dbosCtx = dbosCtx.WithValue("synthesisEnabled", runAll || params.RunModules == constants.RUN_MODULES_SYNTHESIS)
 
-	// start at level -1, step -1, to be increased
-	wsGlobalParams := requests.WorkflowParamsGlobal{
+	wsGlobalParams := requests.WorkflowGlobalParams{
 		Name:          params.Name,
 		RunModules:    params.RunModules,
 		WorkflowState: requests.NewWorkflowState(),
@@ -53,7 +52,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		return responses.WorkflowResult{}, errPlaceholder1
 	}
 	paramsPhase1 := requests.WorkflowParamsPhase1{
-		WorkflowParamsGlobal: wsGlobalParams,
+		WorkflowGlobalParams: wsGlobalParams,
 	}
 	resultPhase1, err := MainWorkflowPhase1(dbosCtx, &paramsPhase1)
 	if err != nil {
@@ -65,7 +64,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		return responses.WorkflowResult{}, errPlaceholder2
 	}
 	paramsPhase2 := requests.WorkflowParamsPhase2{
-		WorkflowParamsGlobal: wsGlobalParams,
+		WorkflowGlobalParams: wsGlobalParams,
 		Phase1:               resultPhase1, // injecting results from previous phases
 	}
 	resultPhase2, err := MainWorkflowPhase2(dbosCtx, &paramsPhase2)
@@ -78,7 +77,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		return responses.WorkflowResult{}, errPlaceholder3
 	}
 	paramsPhase3 := requests.WorkflowParamsPhase3{
-		WorkflowParamsGlobal: wsGlobalParams,
+		WorkflowGlobalParams: wsGlobalParams,
 		Phase1:               resultPhase1, // injecting results from previous phases
 		Phase2:               resultPhase2,
 	}
@@ -99,7 +98,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	return results, nil
 }
 
-func MainWorkflowPlaceholder(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsGlobal) error {
+func MainWorkflowPlaceholder(dbosCtx dbos.DBOSContext, params *requests.WorkflowGlobalParams) error {
 	_, err := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
 		dbos.WithStepName(buildModuleName(params.NextGlobalLevel(), StartLevelName)),
 		dbos.WithNextStepID(params.NextStepID()),
@@ -116,12 +115,10 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	defaultOpts := utils.BuildModuleOpts()
 
 	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.DataCollectionModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name))
-	opts1 = append(opts1, dbos.WithNextStepID(params.NextStepID()))
+	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
 
 	step2Name := buildModuleName(params.CurrentGlobalLevel(), modules.EvidencesCollectionModuleName)
-	opts2 := append(defaultOpts, dbos.WithStepName(step2Name))
-	opts2 = append(opts2, dbos.WithNextStepID(params.NextStepID()))
+	opts2 := append(defaultOpts, dbos.WithStepName(step2Name), dbos.WithNextStepID(params.NextStepID()))
 
 	numModules := 2
 	wg := &sync.WaitGroup{}
@@ -168,12 +165,10 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	defaultOpts := utils.BuildModuleOpts()
 
 	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.PepModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name))
-	opts1 = append(opts1, dbos.WithNextStepID(params.NextStepID()))
+	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
 
 	step2Name := buildModuleName(params.CurrentGlobalLevel(), modules.SanctionsModuleName)
-	opts2 := append(defaultOpts, dbos.WithStepName(step2Name))
-	opts2 = append(opts2, dbos.WithNextStepID(params.NextStepID()))
+	opts2 := append(defaultOpts, dbos.WithStepName(step2Name), dbos.WithNextStepID(params.NextStepID()))
 
 	numModules := 2
 	wg := &sync.WaitGroup{}
@@ -220,8 +215,7 @@ func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	defaultOpts := utils.BuildModuleOpts()
 
 	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.SynthesisModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name))
-	opts1 = append(opts1, dbos.WithNextStepID(params.NextStepID()))
+	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
 
 	output, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts1...)
 	if err != nil {

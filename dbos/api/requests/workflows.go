@@ -88,24 +88,24 @@ func NewWorkflowState() *WorkflowState {
 	}
 }
 
-type WorkflowParamsGlobal struct {
+type WorkflowGlobalParams struct {
 	Name           string           `json:"name"`
 	RunModules     constants.Module `json:"runModules"`
 	*WorkflowState `json:"-"`
 }
 
 type WorkflowParamsPhase1 struct {
-	WorkflowParamsGlobal
+	WorkflowGlobalParams
 }
 
 type WorkflowParamsPhase2 struct {
-	WorkflowParamsGlobal
+	WorkflowGlobalParams
 	// this will receive the outputs from phase 1
 	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
 }
 
 type WorkflowParamsPhase3 struct {
-	WorkflowParamsGlobal
+	WorkflowGlobalParams
 	// this will receive the outputs from phase 1 and phase 2
 	Phase1 responses.WorkflowResultPhase1 `json:"outputPhase1"`
 	Phase2 responses.WorkflowResultPhase2 `json:"outputPhase2"`

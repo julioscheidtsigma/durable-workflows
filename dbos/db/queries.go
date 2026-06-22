@@ -54,7 +54,7 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
-		nil, // application_version - originalWorkflow.ApplicationVersion
+		originalWorkflow.ApplicationVersion, // application_version
 		originalWorkflow.Queue,
 		inputs,                         // encoded
 		nowUnix,                        // created_at

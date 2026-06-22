@@ -244,11 +244,16 @@ function render() {
         label = label + " (failed)";
       }
 
+      let tmpOutput = {};
       if (output) {
-        output["localLevel"] = localLevel;
-        output["globalLevel"] = globalLevel;
+        tmpOutput = { ...output };
+      } else {
+        tmpOutput["name"] = "Start";
       }
-      const tipData = output ? JSON.stringify(output) : '{"name": "start"}';
+      tmpOutput["globalLevel"] = globalLevel;
+      tmpOutput["localLevel"] = localLevel;
+
+      const tipData = JSON.stringify(tmpOutput);
 
       html += `
         <g class="node-group" data-tip='${tipData}' style="cursor:pointer" onclick="onClickNodeForkWorkflow('${localLevel}')">
