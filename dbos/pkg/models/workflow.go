@@ -8,16 +8,16 @@ import (
 )
 
 type Workflow struct {
-	WorkflowUUID       string `json:"workflowUUID"`
-	Status             string `json:"status"`
-	Name               string `json:"name"`
-	Inputs             string `json:"inputs"`
-	Output             string `json:"output"`
-	Attempts           int    `json:"attempts"`
-	Queue              string `json:"queue"`
-	Serialization      string `json:"serialization"`
-	RateLimited        bool   `json:"rateLimited"`
-	ApplicationVersion string `json:"applicationVersion"`
+	WorkflowUUID       string  `json:"workflowUUID"`
+	Status             string  `json:"status"`
+	Name               string  `json:"name"`
+	Inputs             string  `json:"inputs"`
+	Output             *string `json:"output"`
+	Attempts           int     `json:"attempts"`
+	Queue              *string `json:"queue"`
+	Serialization      string  `json:"serialization"`
+	RateLimited        bool    `json:"rateLimited"`
+	ApplicationVersion string  `json:"applicationVersion"`
 }
 
 func WorkflowFromStatus(ws dbos.WorkflowStatus) Workflow {
@@ -34,9 +34,9 @@ func WorkflowFromStatus(ws dbos.WorkflowStatus) Workflow {
 		Status:        string(ws.Status),
 		Name:          ws.Name,
 		Inputs:        input,
-		Output:        output,
+		Output:        &output,
 		Attempts:      ws.Attempts,
-		Queue:         ws.QueueName,
+		Queue:         &ws.QueueName,
 		Serialization: ws.Serialization,
 	}
 }
@@ -52,6 +52,11 @@ type WorkflowStepWithLevel struct {
 	Inputs       string     `json:"inputs"`
 	StartedAt    *time.Time `json:"startedAt"`
 	CompletedAt  *time.Time `json:"completedAt"`
+}
+
+type WorkflowNodesWithStatus struct {
+	Nodes          map[int][]WorkflowNode `json:"nodes"`
+	WorkflowStatus string                 `json:"workflowStatus"`
 }
 
 type WorkflowNode struct {

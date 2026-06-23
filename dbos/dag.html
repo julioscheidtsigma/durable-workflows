@@ -76,13 +76,17 @@
   <div id="message" style="display:none;flex-direction:column;align-items:center;gap:8px;padding:60px;color:#888">
     <span style="font-size:14px;font-weight:500">Nothing to show</span>
   </div>
-  
+
   <div id="chart-wrap" class="chart-wrap" style="display:none">
     <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:10px;color:#888">
       <button onclick="toggleAutoRefresh()" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;margin-left:32px;">
         Toggle Auto-Refresh
       </button>
-    </div>  
+
+      <span id="workflow-status" style="margin-top:8px;padding:6px 16px;background:#fff;font-size:13px;margin-left:32px;">
+        Status: Success
+      </span>
+    </div> 
     
     <svg id="chart"></svg>
   </div>
@@ -112,6 +116,7 @@ let dummyData = {
   ]
 };
 let data = null;
+let workflowStatus = null;
 let interval = null;
 
 const COLORS = {
@@ -166,11 +171,11 @@ async function onClickNodeForkWorkflow(startStep) {
   try {
     const res = await fetch(endpoint, { method: "POST" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = await res.json();
-    console.log('data', data);
+    const response = await res.json();
+    console.log('response', response);
 
-    if (data['workflowUUID']) {
-      const newUUID = data['workflowUUID'];
+    if (response['workflowUUID']) {
+      const newUUID = response['workflowUUID'];
       const newURL = `${window.location.origin}${window.location.pathname}?workflowUUID=${newUUID}`;
       window.history.pushState({ path: newURL }, '', newURL);
       // restart auto-refresh for the new workflow
@@ -294,6 +299,14 @@ function render() {
       tip.style.opacity = 0;
     });
   });
+
+  // set workflow-status content
+  const statusEl = document.getElementById("workflow-status");
+  if (workflowStatus) {
+    statusEl.textContent = `Status: ${workflowStatus}`;
+  } else {
+    statusEl.textContent = `Status: Unknown`;
+  }
 }
 
 function getUUIDFromURL() {
@@ -315,12 +328,23 @@ async function init() {
   try {
     const res = await fetch(endpoint);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = await res.json();
+    const response = await res.json();
+  
+    data = response['nodes'];
+    workflowStatus = response['workflowStatus'];
     console.log('data', data);
+    console.log('workflowStatus', workflowStatus);
 
     showState("chart-wrap");
     render();
     window.addEventListener("resize", render);
+
+    if (workflowStatus == "SUCCESS" || workflowStatus == "CANCELLED" || workflowStatus == "ERROR") {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    }
 
   } catch (err) {
     console.error("Failed to fetch graph data:", err);

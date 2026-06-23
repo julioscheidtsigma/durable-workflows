@@ -102,14 +102,10 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 			return c.JSON(http.StatusBadRequest, buildErrorResponse(err.Error()))
 		}
 
-		ctx := context.Background()
+		ctx := context.TODO()
 
 		fmt.Printf("ForkWorkflowHandler: starting transaction\n")
 		tx, err := database.BeginTransaction(ctx)
-		if err != nil {
-			fmt.Printf("ForkWorkflowHandler: error starting database transaction: %+v\n", err)
-			return c.JSON(http.StatusInternalServerError, buildErrorResponse("error starting database transaction"))
-		}
 
 		defer func() {
 			if err != nil {
@@ -118,17 +114,15 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 			}
 		}()
 
+		if err != nil {
+			fmt.Printf("ForkWorkflowHandler: error starting database transaction: %+v\n", err)
+			return c.JSON(http.StatusInternalServerError, buildErrorResponse("error starting database transaction"))
+		}
+
 		originalWorkflow, err := database.GetWorkflow(dbosCtx, originalWorkflowID)
 		if err != nil {
 			fmt.Printf("ForkWorkflowHandler: error fetching original workflow: %+v\n", err)
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
-		}
-
-		// check if the workflow is in ERROR or SUCCESS status, if not, return an error
-		if originalWorkflow.Status != db.WorkflowStatusError && originalWorkflow.Status != db.WorkflowStatusSucess {
-			fmt.Printf("ForkWorkflowHandler: rolling back transaction\n")
-			_ = database.RollbackTransaction(tx, ctx)
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("can only fork workflows that are in ERROR or SUCCESS status"))
 		}
 
 		inputs := originalWorkflow.Inputs
@@ -155,6 +149,16 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 		if err != nil {
 			fmt.Printf("ForkWorkflowHandler: error copying workflow: %+v\n", err)
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
+		}
+
+		// check if the workflow is in ERROR or SUCCESS status, if not, cancel the workflow after copying
+		if originalWorkflow.Status != db.WorkflowStatusError && originalWorkflow.Status != db.WorkflowStatusSucess {
+			fmt.Printf("ForkWorkflowHandler: cancelling the original workflow\n")
+			err = dbos.CancelWorkflows(dbosCtx, []string{originalWorkflowID})
+			if err != nil {
+				fmt.Printf("ForkWorkflowHandler: error cancelling original workflow: %+v\n", err)
+				return c.JSON(http.StatusBadRequest, buildErrorResponse("error cancelling original workflow"))
+			}
 		}
 
 		fmt.Printf("ForkWorkflowHandler: committing transaction\n")
@@ -189,7 +193,16 @@ func ListWorkflowsHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue
 
 func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue dbos.WorkflowQueue) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		var err error
+
 		workflowID := c.Param("workflowUUID")
+
+		originalWorkflow, err := database.GetWorkflow(dbosCtx, workflowID)
+		if err != nil {
+			fmt.Printf("GetWorkflowExecutionGraphHandler: error fetching original workflow %+v\n", err)
+			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching original workflow"))
+		}
+
 		steps, err := database.GetWorkflowStepsWithLevels(dbosCtx, workflowID)
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error fetching workflow steps"))
@@ -239,7 +252,12 @@ func GetWorkflowExecutionGraphHandler(dbosCtx dbos.DBOSContext, database *db.Dat
 			}
 		}
 
-		return c.JSON(http.StatusOK, stepsByGlobalLevelMap)
+		workflowNodesWithStatus := models.WorkflowNodesWithStatus{
+			Nodes:          stepsByGlobalLevelMap,
+			WorkflowStatus: originalWorkflow.Status,
+		}
+
+		return c.JSON(http.StatusOK, workflowNodesWithStatus)
 	}
 }
 
@@ -288,6 +306,7 @@ func main() {
 		fmt.Printf("Error connecting to database: %s\n", errConn)
 	}
 	database := db.NewDatabase(conn)
+	defer conn.Close(ctx)
 
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{

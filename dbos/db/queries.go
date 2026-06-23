@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,7 +16,9 @@ const (
 )
 
 type Database struct {
-	conn *pgx.Conn
+	conn          *pgx.Conn
+	txConn        *pgx.Conn
+	isTransaction bool
 }
 
 func NewDatabase(conn *pgx.Conn) *Database {
@@ -23,20 +26,48 @@ func NewDatabase(conn *pgx.Conn) *Database {
 }
 
 func (db *Database) BeginTransaction(ctx context.Context) (pgx.Tx, error) {
+	if db.isTransaction {
+		return nil, pgx.ErrTxClosed // already in a transaction
+	}
 	tx, err := db.conn.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	db.conn = tx.Conn()
+	db.txConn = tx.Conn()
+	db.isTransaction = true
 	return tx, nil
 }
 
 func (db *Database) CommitTransaction(tx pgx.Tx, ctx context.Context) error {
-	return tx.Commit(ctx)
+	err := tx.Commit(ctx)
+	db.txConn = nil
+	db.isTransaction = false
+	return err
 }
 
 func (db *Database) RollbackTransaction(tx pgx.Tx, ctx context.Context) error {
-	return tx.Rollback(ctx)
+	err := tx.Rollback(ctx)
+	db.txConn = nil
+	db.isTransaction = false
+	return err
+}
+
+func (db *Database) getConn() *pgx.Conn {
+	if db.isTransaction {
+		if db.txConn.PgConn().IsBusy() {
+			fmt.Printf("Warning: txConn is busy, using the main connection for new queries.\n")
+		}
+		if db.txConn.IsClosed() {
+			db.txConn = nil
+			db.isTransaction = false
+			return db.conn
+		}
+		return db.txConn
+	}
+	if db.conn.PgConn().IsBusy() {
+		fmt.Printf("Warning: conn is busy, using the main connection for new queries.\n")
+	}
+	return db.conn
 }
 
 func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs string, originalWorkflow models.Workflow) error {
@@ -50,7 +81,7 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	nowUnix := time.Now().UnixMilli()
-	_, err := db.conn.Exec(ctx, query,
+	_, err := db.getConn().Exec(ctx, query,
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
@@ -85,8 +116,7 @@ func (db *Database) CopyWorkflowOutputs(ctx context.Context, workflowID, origina
 		query = query + " AND function_id <> $3"
 		step = *onlyStep
 	}
-
-	_, err := db.conn.Exec(ctx, query, workflowID, originalWorkflowID, step)
+	_, err := db.getConn().Exec(ctx, query, workflowID, originalWorkflowID, step)
 	return err
 }
 
@@ -101,8 +131,8 @@ func (db *Database) GetWorkflow(ctx context.Context, workflowID string) (models.
 		LIMIT 1
 	`
 	var workflow = models.Workflow{}
-	row := db.conn.QueryRow(ctx, query, workflowID)
-	err := row.Scan(
+	row := db.getConn().QueryRow(ctx, query, workflowID)
+	err := row.Scan( // scan will release the connection
 		&workflow.WorkflowUUID,
 		&workflow.Status,
 		&workflow.Name,
@@ -113,9 +143,13 @@ func (db *Database) GetWorkflow(ctx context.Context, workflowID string) (models.
 		&workflow.RateLimited,
 		&workflow.ApplicationVersion,
 	)
+	if err != nil {
+		return models.Workflow{}, err
+	}
 	if workflow.WorkflowUUID == "" {
 		return models.Workflow{}, pgx.ErrNoRows
 	}
+
 	return workflow, err
 }
 
@@ -145,7 +179,7 @@ func (db *Database) GetWorkflowStepsWithLevels(ctx context.Context, workflowID s
 		LIMIT 100
 	`
 	var steps = []models.WorkflowStepWithLevel{}
-	rows, err := db.conn.Query(ctx, query, workflowID)
+	rows, err := db.getConn().Query(ctx, query, workflowID)
 	if err != nil {
 		return nil, err
 	}
