@@ -49,14 +49,17 @@ done
 # list workflows
 curl -s -X GET "http://localhost:8585/workflow"
 
-# fork a workflow at specific module - changing the inputs
+# fork a workflow to start at a specific step - changing the inputs
 curl -s -X POST "http://localhost:8585/workflow/f8e97ce5-4540-4f20-8b60-7a2f3dd1eedf/fork?startStep=3" \
   -H 'Content-Type: application/json' \
   --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
-# fork a workflow at specific module - same input - failed workflows
+# fork a workflow to start at a specific step - same input - failed workflows
 curl -s -X POST "http://localhost:8585/workflow/d0fe415d-36db-4521-822a-50cbca98ca35/fork?startStep=3"
 
-curl -s -X POST "http://localhost:8585/workflow/d0fe415d-36db-4521-822a-50cbca98ca35/fork?onlyStep=4"
+# fork a workflow to run only a specific step - same input
+curl -s -X POST "http://localhost:8585/workflow/95e051be-ffa0-4e46-88e7-e54c2e62f81b/fork?onlyStep=4" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
 
 # get exeuction graph
 curl -s -X GET "http://localhost:8585/workflow/c48d9f7d-9588-4e5f-a13f-97ade7083484/graph"
