@@ -63,13 +63,12 @@ func (p WorkflowRequestParams) IdempotencyKey() string {
 }
 
 type WorkflowState struct {
-	stepID        int
 	globalLevelID int
+	// stepID        int
 }
 
-func (ws *WorkflowState) NextStepID() int {
-	ws.stepID++
-	return ws.stepID
+func (ws *WorkflowState) CurrentGlobalLevel() int {
+	return ws.globalLevelID
 }
 
 func (ws *WorkflowState) NextGlobalLevel() int {
@@ -77,14 +76,15 @@ func (ws *WorkflowState) NextGlobalLevel() int {
 	return ws.globalLevelID
 }
 
-func (ws *WorkflowState) CurrentGlobalLevel() int {
-	return ws.globalLevelID
-}
+// func (ws *WorkflowState) NextStepID() int {
+// 	ws.stepID++
+// 	return ws.stepID
+// }
 
 func NewWorkflowState() *WorkflowState {
 	return &WorkflowState{
-		stepID:        -1,
 		globalLevelID: -1,
+		// stepID:        -1,
 	}
 }
 

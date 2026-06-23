@@ -28,6 +28,16 @@ func buildModuleName(globalLevel int, moduleName string) string {
 	return fmt.Sprintf("%s:%d:%s", LevelPrefix, globalLevel, moduleName)
 }
 
+func buildStepOptsFromParams(params *requests.WorkflowGlobalParams, moduleName string) []dbos.StepOption {
+	defaultOpts := utils.BuildModuleOpts()
+	stepName := buildModuleName(params.CurrentGlobalLevel(), moduleName)
+
+	opts := slices.Clone(defaultOpts)
+	opts = append(opts, dbos.WithStepName(stepName))
+
+	return opts
+}
+
 func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParams) (responses.WorkflowResult, error) {
 	fmt.Printf("Starting MainWorkflow\n")
 
@@ -36,6 +46,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	fmt.Printf("MainWorkflow: params %+v\n", params)
 
 	runAll := params.RunModules.RunAllModules()
+	// inject params into the dbosCtx to be accessed by modules
 	dbosCtx = dbosCtx.WithValue("dataCollectionEnabled", runAll || params.RunModules == constants.RUN_MODULES_DATA_COLLECTION)
 	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAll || params.RunModules == constants.RUN_MODULES_EVIDENCES_COLLECTION)
 	dbosCtx = dbosCtx.WithValue("pepEnabled", runAll || params.RunModules == constants.RUN_MODULES_PEP)
@@ -50,19 +61,19 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	}
 
 	// running placehold modules between phases to help in the workflow execution graph
-	errPlaceholder1 := MainWorkflowPlaceholder(dbosCtx, &wsGlobalParams)
+	errPlaceholder1 := MainWorkflowPlaceholderWrapper(dbosCtx, &wsGlobalParams)
 	if errPlaceholder1 != nil {
 		return responses.WorkflowResult{}, errPlaceholder1
 	}
 	paramsPhase1 := requests.WorkflowParamsPhase1{
 		WorkflowGlobalParams: wsGlobalParams,
 	}
-	resultPhase1, err := MainWorkflowPhase1(dbosCtx, &paramsPhase1)
+	resultPhase1, err := MainWorkflowPhase1Wrapper(dbosCtx, &paramsPhase1)
 	if err != nil {
 		return responses.WorkflowResult{}, err
 	}
 
-	errPlaceholder2 := MainWorkflowPlaceholder(dbosCtx, &wsGlobalParams)
+	errPlaceholder2 := MainWorkflowPlaceholderWrapper(dbosCtx, &wsGlobalParams)
 	if errPlaceholder2 != nil {
 		return responses.WorkflowResult{}, errPlaceholder2
 	}
@@ -70,12 +81,12 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		WorkflowGlobalParams: wsGlobalParams,
 		Phase1:               resultPhase1, // injecting results from previous phases
 	}
-	resultPhase2, err := MainWorkflowPhase2(dbosCtx, &paramsPhase2)
+	resultPhase2, err := MainWorkflowPhase2Wrapper(dbosCtx, &paramsPhase2)
 	if err != nil {
 		return responses.WorkflowResult{}, err
 	}
 
-	errPlaceholder3 := MainWorkflowPlaceholder(dbosCtx, &wsGlobalParams)
+	errPlaceholder3 := MainWorkflowPlaceholderWrapper(dbosCtx, &wsGlobalParams)
 	if errPlaceholder3 != nil {
 		return responses.WorkflowResult{}, errPlaceholder3
 	}
@@ -84,7 +95,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		Phase1:               resultPhase1, // injecting results from previous phases
 		Phase2:               resultPhase2,
 	}
-	resultPhase3, err := MainWorkflowPhase3(dbosCtx, &paramsPhase3)
+	resultPhase3, err := MainWorkflowPhase3Wrapper(dbosCtx, &paramsPhase3)
 	if err != nil {
 		return responses.WorkflowResult{}, err
 	}
@@ -101,30 +112,19 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	return results, nil
 }
 
-func MainWorkflowPlaceholder(dbosCtx dbos.DBOSContext, params *requests.WorkflowGlobalParams) error {
+func MainWorkflowPlaceholderWrapper(dbosCtx dbos.DBOSContext, params *requests.WorkflowGlobalParams) error {
 	_, err := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
 		dbos.WithStepName(buildModuleName(params.NextGlobalLevel(), StartLevelName)),
 	)
 	return err
 }
 
-func buildStepOptsFromParams(params *requests.WorkflowGlobalParams, moduleName string) []dbos.StepOption {
-	defaultOpts := utils.BuildModuleOpts()
-	stepName := buildModuleName(params.CurrentGlobalLevel(), moduleName)
-
-	opts := slices.Clone(defaultOpts)
-	opts = append(opts, dbos.WithStepName(stepName))
-
-	return opts
-}
-
-func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
+func MainWorkflowPhase1Wrapper(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
 	// inject params into the context so that modules can access it
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase1, *params)
 	results := &responses.WorkflowResultPhase1{}
 
 	params.NextGlobalLevel() // increase one global level
-	fmt.Printf("MainWorkflowPhase1: params %+v\n", params)
 	var outputsChan []<-chan dbos.StepOutcome[responses.ModuleResult]
 
 	// first step
@@ -157,17 +157,16 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 		}
 	}
 
-	fmt.Printf("MainWorkflowPhase1: results %+v\n", results)
+	fmt.Printf("MainWorkflowPhase1Wrapper: results %+v\n", results)
 	return *results, nil
 }
 
-func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
+func MainWorkflowPhase2Wrapper(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase2) (responses.WorkflowResultPhase2, error) {
 	// inject params into the context so that modules can access it
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase2, *params)
 	results := &responses.WorkflowResultPhase2{}
 
 	params.NextGlobalLevel() // increase one global level
-	fmt.Printf("MainWorkflowPhase2: params %+v\n", params)
 	var outputsChan []<-chan dbos.StepOutcome[responses.ModuleResult]
 
 	// first step
@@ -210,17 +209,16 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 		}
 	}
 
-	fmt.Printf("MainWorkflowPhase2: results %+v\n", results)
+	fmt.Printf("MainWorkflowPhase2Wrapper: results %+v\n", results)
 	return *results, nil
 }
 
-func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase3) (responses.WorkflowResultPhase3, error) {
+func MainWorkflowPhase3Wrapper(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase3) (responses.WorkflowResultPhase3, error) {
 	// inject params into the context so that modules can access it
 	dbosCtx = dbosCtx.WithValue(modules.ParamsPhase3, *params)
 	results := &responses.WorkflowResultPhase3{}
 
 	params.NextGlobalLevel() // increase one global level
-	fmt.Printf("MainWorkflowPhase3: params %+v\n", params)
 
 	// first step
 	opts1 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.SynthesisModuleName)
@@ -230,6 +228,6 @@ func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	}
 	results.OutputSynthesis = output1
 
-	fmt.Printf("MainWorkflowPhase3: results %+v\n", results)
+	fmt.Printf("MainWorkflowPhase3Wrapper: results %+v\n", results)
 	return *results, nil
 }
