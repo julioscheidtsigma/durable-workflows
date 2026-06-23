@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	WorkflowStatusEnqueued = "ENQUEUED"
-	WorkflowStatusError    = "ERROR"
-	WorkflowStatusSucess   = "SUCCESS"
+	WorkflowStatusEnqueued  = "ENQUEUED"
+	WorkflowStatusError     = "ERROR"
+	WorkflowStatusSuccess   = "SUCCESS"
+	WorkflowStatusCancelled = "CANCELLED"
 )
 
 type Database struct {
