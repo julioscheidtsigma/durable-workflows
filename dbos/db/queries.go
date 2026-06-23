@@ -54,7 +54,7 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
-		originalWorkflow.ApplicationVersion, // application_version
+		nil, // application_version - originalWorkflow.ApplicationVersion
 		originalWorkflow.Queue,
 		inputs,                         // encoded
 		nowUnix,                        // created_at
@@ -68,14 +68,24 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 	return err
 }
 
-func (db *Database) CopyWorkflowOutputs(ctx context.Context, workflowID, originalWorkflowID string, step int64) error {
+func (db *Database) CopyWorkflowOutputs(ctx context.Context, workflowID, originalWorkflowID string, fromStep, onlyStep *int64) error {
 	query := `
 		INSERT INTO dbos.operation_outputs
 		(workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization)
 		SELECT $1, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, completed_at_epoch_ms, serialization
 		FROM dbos.operation_outputs
-		WHERE workflow_uuid = $2 AND function_id < $3
+		WHERE workflow_uuid = $2
 	`
+	// logic to handle fromStep and onlyStep, in order to copy only the steps that are less than fromStep or not equal to onlyStep
+	var step int64 = 0
+	if fromStep != nil {
+		query = query + " AND function_id < $3"
+		step = *fromStep
+	} else if onlyStep != nil {
+		query = query + " AND function_id <> $3"
+		step = *onlyStep
+	}
+
 	_, err := db.conn.Exec(ctx, query, workflowID, originalWorkflowID, step)
 	return err
 }

@@ -72,12 +72,27 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 		var err error
 
 		originalWorkflowID := c.Param("workflowUUID")
-		forkStep, err := strconv.ParseInt(c.Param("forkStep"), 10, 64)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing fork step parameter"))
-		}
 		fmt.Printf("ForkWorkflowHandler: originalWorkflowID %+v\n", originalWorkflowID)
-		fmt.Printf("ForkWorkflowHandler: forkStep %+v\n", forkStep)
+
+		// params to choose whether to fork the workflow FROM a specific step or ONLY a specific step
+		var startStep *int64 = nil
+		if startStepStr := c.QueryParam("startStep"); startStepStr != "" {
+			startStepParse, err := strconv.ParseInt(startStepStr, 10, 64)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing start step parameter"))
+			}
+			startStep = &startStepParse
+			fmt.Printf("ForkWorkflowHandler: startStep %+v\n", *startStep)
+		}
+		var onlyStep *int64 = nil
+		if onlyStepStr := c.QueryParam("onlyStep"); onlyStepStr != "" {
+			onlyStepParse, err := strconv.ParseInt(onlyStepStr, 10, 64)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, buildErrorResponse("error parsing only step parameter"))
+			}
+			onlyStep = &onlyStepParse
+			fmt.Printf("ForkWorkflowHandler: onlyStep %+v\n", *onlyStep)
+		}
 
 		var req requests.WorkflowRequest
 		if err := c.Bind(&req); err != nil {
@@ -136,7 +151,7 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 		}
 
 		// SKIPPED modules will also be copied
-		err = database.CopyWorkflowOutputs(dbosCtx, forkedWorkflowID, originalWorkflowID, forkStep)
+		err = database.CopyWorkflowOutputs(dbosCtx, forkedWorkflowID, originalWorkflowID, startStep, onlyStep)
 		if err != nil {
 			fmt.Printf("ForkWorkflowHandler: error copying workflow: %+v\n", err)
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
@@ -309,7 +324,7 @@ func main() {
 
 	e := echo.New()
 	e.POST("/workflow", StartWorkflowHandler(dbosCtx, database, eddQueue))
-	e.POST("/workflow/:workflowUUID/fork/:forkStep", ForkWorkflowHandler(dbosCtx, database, eddQueue))
+	e.POST("/workflow/:workflowUUID/fork", ForkWorkflowHandler(dbosCtx, database, eddQueue))
 	e.GET("/workflow", ListWorkflowsHandler(dbosCtx, database, eddQueue))
 	e.GET("/workflow/:workflowUUID/graph", GetWorkflowExecutionGraphHandler(dbosCtx, database, eddQueue))
 	e.POST("/failure/injection", ChangeFailureProbabilityHandler())

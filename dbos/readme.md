@@ -50,11 +50,13 @@ done
 curl -s -X GET "http://localhost:8585/workflow"
 
 # fork a workflow at specific module - changing the inputs
-curl -s -X POST "http://localhost:8585/workflow/f8e97ce5-4540-4f20-8b60-7a2f3dd1eedf/fork/3" \
+curl -s -X POST "http://localhost:8585/workflow/f8e97ce5-4540-4f20-8b60-7a2f3dd1eedf/fork?startStep=3" \
   -H 'Content-Type: application/json' \
   --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
 # fork a workflow at specific module - same input - failed workflows
-curl -s -X POST "http://localhost:8585/workflow/74b3aed8-5a97-402e-89ce-f4788d33588b/fork/3"
+curl -s -X POST "http://localhost:8585/workflow/d0fe415d-36db-4521-822a-50cbca98ca35/fork?startStep=3"
+
+curl -s -X POST "http://localhost:8585/workflow/d0fe415d-36db-4521-822a-50cbca98ca35/fork?onlyStep=4"
 
 # get exeuction graph
 curl -s -X GET "http://localhost:8585/workflow/c48d9f7d-9588-4e5f-a13f-97ade7083484/graph"

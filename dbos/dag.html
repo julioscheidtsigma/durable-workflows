@@ -160,7 +160,7 @@ async function onClickNodeForkWorkflow(startStep) {
     return;
   }
 
-  const endpoint = `${baseAPI}/workflow/${workflowUUID}/fork/${startStep}`;
+  const endpoint = `${baseAPI}/workflow/${workflowUUID}/fork?startStep=${startStep}`;
   showState("loading");
 
   try {
