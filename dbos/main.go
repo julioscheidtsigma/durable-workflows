@@ -291,10 +291,11 @@ func main() {
 
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{
-		DatabaseURL:     dbURL,
-		AppName:         "edd",
-		DatabaseSchema:  "dbos", // default
-		ConductorAPIKey: conductorKey,
+		DatabaseURL:        dbURL,
+		AppName:            "edd",
+		DatabaseSchema:     "dbos", // default
+		ConductorAPIKey:    conductorKey,
+		ApplicationVersion: "1.0.0",
 	})
 	if errInit != nil {
 		fmt.Printf("Error creating DBOS: %s\n", errInit)

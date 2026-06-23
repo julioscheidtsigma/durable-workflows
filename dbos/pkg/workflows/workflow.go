@@ -2,7 +2,7 @@ package workflows
 
 import (
 	"fmt"
-	"sync"
+	"slices"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/julioscheidtsigma/dbos/api/requests"
@@ -29,6 +29,8 @@ func buildModuleName(globalLevel int, moduleName string) string {
 }
 
 func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParams) (responses.WorkflowResult, error) {
+	fmt.Printf("Starting MainWorkflow\n")
+
 	// inject params into the context so that modules can access it
 	dbosCtx = dbosCtx.WithValue("params", params)
 	fmt.Printf("MainWorkflow: params %+v\n", params)
@@ -102,9 +104,18 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 func MainWorkflowPlaceholder(dbosCtx dbos.DBOSContext, params *requests.WorkflowGlobalParams) error {
 	_, err := dbos.RunAsStep(dbosCtx, modules.PlaceholderModule,
 		dbos.WithStepName(buildModuleName(params.NextGlobalLevel(), StartLevelName)),
-		dbos.WithNextStepID(params.NextStepID()),
 	)
 	return err
+}
+
+func buildStepOptsFromParams(params *requests.WorkflowGlobalParams, moduleName string) []dbos.StepOption {
+	defaultOpts := utils.BuildModuleOpts()
+	stepName := buildModuleName(params.CurrentGlobalLevel(), moduleName)
+
+	opts := slices.Clone(defaultOpts)
+	opts = append(opts, dbos.WithStepName(stepName))
+
+	return opts
 }
 
 func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params *requests.WorkflowParamsPhase1) (responses.WorkflowResultPhase1, error) {
@@ -113,43 +124,36 @@ func MainWorkflowPhase1(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	results := &responses.WorkflowResultPhase1{}
 
 	params.NextGlobalLevel() // increase one global level
-	defaultOpts := utils.BuildModuleOpts()
+	fmt.Printf("MainWorkflowPhase1: params %+v\n", params)
+	var outputsChan []<-chan dbos.StepOutcome[responses.ModuleResult]
 
-	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.DataCollectionModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
+	// first step
+	opts1 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.DataCollectionModuleName)
+	ch1, err := dbos.Go(dbosCtx, modules.DataCollectionModule, opts1...)
+	if err != nil {
+		return responses.WorkflowResultPhase1{}, err
+	}
+	outputsChan = append(outputsChan, ch1)
 
-	step2Name := buildModuleName(params.CurrentGlobalLevel(), modules.EvidencesCollectionModuleName)
-	opts2 := append(defaultOpts, dbos.WithStepName(step2Name), dbos.WithNextStepID(params.NextStepID()))
+	// second step
+	opts2 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.EvidencesCollectionModuleName)
+	ch2, err := dbos.Go(dbosCtx, modules.EvidencesCollectionModule, opts2...)
+	if err != nil {
+		return responses.WorkflowResultPhase1{}, err
+	}
+	outputsChan = append(outputsChan, ch2)
 
-	numModules := 2
-	wg := &sync.WaitGroup{}
-	wg.Add(numModules)
-	resultsChan := make(chan ModuleResultWithError, numModules) // buffered channel to hold results from modules
-
-	go func() {
-		defer wg.Done()
-		output, err := dbos.RunAsStep(dbosCtx, modules.DataCollectionModule, opts1...)
-		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
-	}()
-
-	go func() {
-		defer wg.Done()
-		output, err := dbos.RunAsStep(dbosCtx, modules.EvidencesCollectionModule, opts2...)
-		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
-	}()
-
-	wg.Wait()
-	close(resultsChan)
-
-	for output := range resultsChan {
-		if output.err != nil {
-			return responses.WorkflowResultPhase1{}, output.err
+	// collect results
+	for _, ch := range outputsChan {
+		outcome := <-ch
+		if outcome.Err != nil {
+			return responses.WorkflowResultPhase1{}, outcome.Err
 		}
-		switch output.ModuleName {
+		switch outcome.Result.ModuleName {
 		case modules.DataCollectionModuleName:
-			results.OutputDataCollection = output.ModuleResult
+			results.OutputDataCollection = outcome.Result
 		case modules.EvidencesCollectionModuleName:
-			results.OutputEvidencesCollection = output.ModuleResult
+			results.OutputEvidencesCollection = outcome.Result
 		}
 	}
 
@@ -163,54 +167,46 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	results := &responses.WorkflowResultPhase2{}
 
 	params.NextGlobalLevel() // increase one global level
-	defaultOpts := utils.BuildModuleOpts()
+	fmt.Printf("MainWorkflowPhase2: params %+v\n", params)
+	var outputsChan []<-chan dbos.StepOutcome[responses.ModuleResult]
 
-	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.PepModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
+	// first step
+	opts1 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.PepModuleName)
+	ch1, err := dbos.Go(dbosCtx, modules.PepModule, opts1...)
+	if err != nil {
+		return responses.WorkflowResultPhase2{}, err
+	}
+	outputsChan = append(outputsChan, ch1)
 
-	step2Name := buildModuleName(params.CurrentGlobalLevel(), modules.SanctionsModuleName)
-	opts2 := append(defaultOpts, dbos.WithStepName(step2Name), dbos.WithNextStepID(params.NextStepID()))
+	// second step
+	opts2 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.SanctionsModuleName)
+	ch2, err := dbos.Go(dbosCtx, modules.SanctionsModule, opts2...)
+	if err != nil {
+		return responses.WorkflowResultPhase2{}, err
+	}
+	outputsChan = append(outputsChan, ch2)
 
-	step3Name := buildModuleName(params.CurrentGlobalLevel(), modules.AdverseMediaModuleName)
-	opts3 := append(defaultOpts, dbos.WithStepName(step3Name), dbos.WithNextStepID(params.NextStepID()))
+	// third step
+	opts3 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.AdverseMediaModuleName)
+	ch3, err := dbos.Go(dbosCtx, modules.AdverseMediaModule, opts3...)
+	if err != nil {
+		return responses.WorkflowResultPhase2{}, err
+	}
+	outputsChan = append(outputsChan, ch3)
 
-	numModules := 3
-	wg := &sync.WaitGroup{}
-	wg.Add(numModules)
-	resultsChan := make(chan ModuleResultWithError, numModules) // buffered channel to hold results from modules
-
-	go func() {
-		defer wg.Done()
-		output, err := dbos.RunAsStep(dbosCtx, modules.PepModule, opts1...)
-		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
-	}()
-
-	go func() {
-		defer wg.Done()
-		output, err := dbos.RunAsStep(dbosCtx, modules.SanctionsModule, opts2...)
-		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
-	}()
-
-	go func() {
-		defer wg.Done()
-		output, err := dbos.RunAsStep(dbosCtx, modules.AdverseMediaModule, opts3...)
-		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
-	}()
-
-	wg.Wait()
-	close(resultsChan)
-
-	for output := range resultsChan {
-		if output.err != nil {
-			return responses.WorkflowResultPhase2{}, output.err
+	// collect results
+	for _, ch := range outputsChan {
+		outcome := <-ch
+		if outcome.Err != nil {
+			return responses.WorkflowResultPhase2{}, outcome.Err
 		}
-		switch output.ModuleName {
+		switch outcome.Result.ModuleName {
 		case modules.PepModuleName:
-			results.OutputPep = output.ModuleResult
+			results.OutputPep = outcome.Result
 		case modules.SanctionsModuleName:
-			results.OutputSanctions = output.ModuleResult
+			results.OutputSanctions = outcome.Result
 		case modules.AdverseMediaModuleName:
-			results.OutputAdverseMedia = output.ModuleResult
+			results.OutputAdverseMedia = outcome.Result
 		}
 	}
 
@@ -224,16 +220,15 @@ func MainWorkflowPhase3(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	results := &responses.WorkflowResultPhase3{}
 
 	params.NextGlobalLevel() // increase one global level
-	defaultOpts := utils.BuildModuleOpts()
+	fmt.Printf("MainWorkflowPhase3: params %+v\n", params)
 
-	step1Name := buildModuleName(params.CurrentGlobalLevel(), modules.SynthesisModuleName)
-	opts1 := append(defaultOpts, dbos.WithStepName(step1Name), dbos.WithNextStepID(params.NextStepID()))
-
-	output, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts1...)
+	// first step
+	opts1 := buildStepOptsFromParams(&params.WorkflowGlobalParams, modules.SynthesisModuleName)
+	output1, err := dbos.RunAsStep(dbosCtx, modules.SynthesisModule, opts1...)
 	if err != nil {
 		return responses.WorkflowResultPhase3{}, err
 	}
-	results.OutputSynthesis = output
+	results.OutputSynthesis = output1
 
 	fmt.Printf("MainWorkflowPhase3: results %+v\n", results)
 	return *results, nil
