@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/julioscheidtsigma/dbos/pkg/constants"
 	"github.com/julioscheidtsigma/dbos/pkg/models"
 )
 
@@ -81,13 +82,20 @@ func (db *Database) InsertWorkflow(ctx context.Context, workflowID, inputs strin
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
+
+	queue := originalWorkflow.Queue
+	if queue == nil || *queue == "" {
+		q := constants.QueueName
+		queue = &q
+	}
+
 	nowUnix := time.Now().UnixMilli()
 	_, err := db.getConn().Exec(ctx, query,
 		workflowID,
 		WorkflowStatusEnqueued,
 		originalWorkflow.Name,
 		nil, // application_version - originalWorkflow.ApplicationVersion
-		originalWorkflow.Queue,
+		queue,
 		inputs,                         // encoded
 		nowUnix,                        // created_at
 		nowUnix,                        // updated_at

@@ -151,12 +151,15 @@ func ForkWorkflowHandler(dbosCtx dbos.DBOSContext, database *db.Database, queue 
 			return c.JSON(http.StatusBadRequest, buildErrorResponse("error forking workflow"))
 		}
 
+		workflowState := dbosCtx.Value("workflowState")
+		fmt.Printf("ForkWorkflowHandler: workflowState %+v\n", workflowState)
+
 		// check if the workflow is in ERROR/SUCCESS/CANCELLED status, if not, cancel the workflow after copying
 		if originalWorkflow.Status != db.WorkflowStatusError &&
 			originalWorkflow.Status != db.WorkflowStatusSuccess &&
 			originalWorkflow.Status != db.WorkflowStatusCancelled {
 			fmt.Printf("ForkWorkflowHandler: cancelling the original workflow\n")
-			err = dbos.CancelWorkflows(dbosCtx, []string{originalWorkflowID})
+			err = dbos.CancelWorkflow(dbosCtx, originalWorkflowID)
 			if err != nil {
 				fmt.Printf("ForkWorkflowHandler: error cancelling original workflow: %+v\n", err)
 				return c.JSON(http.StatusBadRequest, buildErrorResponse("error cancelling original workflow"))

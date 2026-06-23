@@ -17,7 +17,7 @@ type Workflow struct {
 	Queue              *string `json:"queue"`
 	Serialization      string  `json:"serialization"`
 	RateLimited        bool    `json:"rateLimited"`
-	ApplicationVersion string  `json:"applicationVersion"`
+	ApplicationVersion *string `json:"applicationVersion"`
 }
 
 func WorkflowFromStatus(ws dbos.WorkflowStatus) Workflow {
