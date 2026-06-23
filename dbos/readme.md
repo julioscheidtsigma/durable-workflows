@@ -59,7 +59,7 @@ curl -s -X POST "http://localhost:8585/workflow/d0fe415d-36db-4521-822a-50cbca98
 # fork a workflow to run only a specific step - same input
 curl -s -X POST "http://localhost:8585/workflow/95e051be-ffa0-4e46-88e7-e54c2e62f81b/fork?onlyStep=4" \
   -H 'Content-Type: application/json' \
-  --data-raw '{"name": "Volodymyr Zelenskyy", "runModules": 0}'
+  --data-raw '{"name": "Vladimir Putin", "runModules": 0}'
 
 # get exeuction graph
 curl -s -X GET "http://localhost:8585/workflow/c48d9f7d-9588-4e5f-a13f-97ade7083484/graph"

@@ -38,6 +38,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 	dbosCtx = dbosCtx.WithValue("evidencesCollectionEnabled", runAll || params.RunModules == constants.RUN_MODULES_EVIDENCES_COLLECTION)
 	dbosCtx = dbosCtx.WithValue("pepEnabled", runAll || params.RunModules == constants.RUN_MODULES_PEP)
 	dbosCtx = dbosCtx.WithValue("sanctionsEnabled", runAll || params.RunModules == constants.RUN_MODULES_SANCTIONS)
+	dbosCtx = dbosCtx.WithValue("adverseMediaEnabled", runAll || params.RunModules == constants.RUN_MODULES_ADVERSE_MEDIA)
 	dbosCtx = dbosCtx.WithValue("synthesisEnabled", runAll || params.RunModules == constants.RUN_MODULES_SYNTHESIS)
 
 	wsGlobalParams := requests.WorkflowGlobalParams{
@@ -170,7 +171,10 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 	step2Name := buildModuleName(params.CurrentGlobalLevel(), modules.SanctionsModuleName)
 	opts2 := append(defaultOpts, dbos.WithStepName(step2Name), dbos.WithNextStepID(params.NextStepID()))
 
-	numModules := 2
+	step3Name := buildModuleName(params.CurrentGlobalLevel(), modules.AdverseMediaModuleName)
+	opts3 := append(defaultOpts, dbos.WithStepName(step3Name), dbos.WithNextStepID(params.NextStepID()))
+
+	numModules := 3
 	wg := &sync.WaitGroup{}
 	wg.Add(numModules)
 	resultsChan := make(chan ModuleResultWithError, numModules) // buffered channel to hold results from modules
@@ -187,6 +191,12 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
 	}()
 
+	go func() {
+		defer wg.Done()
+		output, err := dbos.RunAsStep(dbosCtx, modules.AdverseMediaModule, opts3...)
+		resultsChan <- ModuleResultWithError{ModuleResult: output, err: err}
+	}()
+
 	wg.Wait()
 	close(resultsChan)
 
@@ -199,6 +209,8 @@ func MainWorkflowPhase2(dbosCtx dbos.DBOSContext, params *requests.WorkflowParam
 			results.OutputPep = output.ModuleResult
 		case modules.SanctionsModuleName:
 			results.OutputSanctions = output.ModuleResult
+		case modules.AdverseMediaModuleName:
+			results.OutputAdverseMedia = output.ModuleResult
 		}
 	}
 

@@ -306,8 +306,10 @@ func main() {
 		Limit:  QueueRateLimiterLimit,
 		Period: 60 * time.Second,
 	}
+
 	eddQueue := dbos.NewWorkflowQueue(dbosCtx, constants.QueueName,
 		dbos.WithWorkerConcurrency(QueueWorkerConcurrency),
+		// dbos.WithGlobalConcurrency(100), // set global concurrency limit for all workflows
 		dbos.WithRateLimiter(rateLimiter),
 		dbos.WithPriorityEnabled(),
 		dbos.WithQueueBasePollingInterval(1*time.Second),

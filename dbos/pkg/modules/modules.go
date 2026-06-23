@@ -15,11 +15,15 @@ var (
 
 const (
 	// modules
+	// phase 1
 	DataCollectionModuleName      = "DataCollectionModule"
 	EvidencesCollectionModuleName = "EvidencesCollectionModule"
-	PepModuleName                 = "PepModule"
-	SanctionsModuleName           = "SanctionsModule"
-	SynthesisModuleName           = "SynthesisModule"
+	// phase 2
+	PepModuleName          = "PepModule"
+	SanctionsModuleName    = "SanctionsModule"
+	AdverseMediaModuleName = "AdverseMediaModule"
+	// phase 3
+	SynthesisModuleName = "SynthesisModule"
 	// statuses
 	SkippedModule  = "SKIPPED"
 	ExecutedModule = "EXECUTED"
@@ -82,11 +86,13 @@ func EvidencesCollectionModule(ctx context.Context) (responses.ModuleResult, err
 // phase 2
 func PepModule(ctx context.Context) (responses.ModuleResult, error) {
 	params := ctx.Value(ParamsPhase2).(requests.WorkflowParamsPhase2)
-	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
-	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
+
+	resultPhase1DC := params.Phase1.OutputDataCollection.Output
+	resultPhase1EC := params.Phase1.OutputEvidencesCollection.Output
+
 	response := responses.ModuleResult{
 		ModuleName: PepModuleName,
-		Output:     params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName,
+		Output:     params.Name + " - DC: " + resultPhase1DC + " - EC: " + resultPhase1EC,
 		Status:     ExecutedModule,
 	}
 	pepEnabled := ctx.Value("pepEnabled").(bool)
@@ -100,11 +106,13 @@ func PepModule(ctx context.Context) (responses.ModuleResult, error) {
 
 func SanctionsModule(ctx context.Context) (responses.ModuleResult, error) {
 	params := ctx.Value(ParamsPhase2).(requests.WorkflowParamsPhase2)
-	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
-	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
+
+	resultPhase1DC := params.Phase1.OutputDataCollection.Output
+	resultPhase1EC := params.Phase1.OutputEvidencesCollection.Output
+
 	response := responses.ModuleResult{
 		ModuleName: SanctionsModuleName,
-		Output:     params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName,
+		Output:     params.Name + " - DC: " + resultPhase1DC + " - EC: " + resultPhase1EC,
 		Status:     ExecutedModule,
 	}
 	sanctionsEnabled := ctx.Value("sanctionsEnabled").(bool)
@@ -116,17 +124,42 @@ func SanctionsModule(ctx context.Context) (responses.ModuleResult, error) {
 	return GenericWorkflowModule(ctx, response)
 }
 
+func AdverseMediaModule(ctx context.Context) (responses.ModuleResult, error) {
+	params := ctx.Value(ParamsPhase2).(requests.WorkflowParamsPhase2)
+
+	resultPhase1DC := params.Phase1.OutputDataCollection.Output
+	resultPhase1EC := params.Phase1.OutputEvidencesCollection.Output
+
+	response := responses.ModuleResult{
+		ModuleName: AdverseMediaModuleName,
+		Output:     params.Name + " - DC: " + resultPhase1DC + " - EC: " + resultPhase1EC,
+		Status:     ExecutedModule,
+	}
+	adverseMediaEnabled := ctx.Value("adverseMediaEnabled").(bool)
+	if !adverseMediaEnabled {
+		response.Status = SkippedModule
+		response.Output = ""
+		return response, nil
+	}
+	return GenericWorkflowModule(ctx, response)
+}
+
 // phase 3
 func SynthesisModule(ctx context.Context) (responses.ModuleResult, error) {
 	params := ctx.Value(ParamsPhase3).(requests.WorkflowParamsPhase3)
-	resultPhase1DCName := params.Phase1.OutputDataCollection.Output
-	resultPhase1ECName := params.Phase1.OutputEvidencesCollection.Output
-	resultPhase2PepName := params.Phase2.OutputPep.Output
-	resultPhase2SanctionsName := params.Phase2.OutputSanctions.Output
+
+	resultPhase1DC := params.Phase1.OutputDataCollection.Output
+	resultPhase1EC := params.Phase1.OutputEvidencesCollection.Output
+
+	resultPhase2Pep := params.Phase2.OutputPep.Output
+	resultPhase2Sanctions := params.Phase2.OutputSanctions.Output
+	resultPhase2AdverseMedia := params.Phase2.OutputAdverseMedia.Output
+
 	response := responses.ModuleResult{
-		ModuleName: SanctionsModuleName,
-		Output: params.Name + " - DC: " + resultPhase1DCName + " - EC: " + resultPhase1ECName +
-			" - Pep: " + resultPhase2PepName + " - Sanctions: " + resultPhase2SanctionsName,
+		ModuleName: SynthesisModuleName,
+		Output: params.Name + " - DC: " + resultPhase1DC + " - EC: " + resultPhase1EC +
+			" - Pep: " + resultPhase2Pep + " - Sanctions: " + resultPhase2Sanctions +
+			" - AdverseMedia: " + resultPhase2AdverseMedia,
 		Status: ExecutedModule,
 	}
 	synthesisEnabled := ctx.Value("synthesisEnabled").(bool)

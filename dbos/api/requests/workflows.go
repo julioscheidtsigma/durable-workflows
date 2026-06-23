@@ -19,8 +19,8 @@ func (p *WorkflowRequest) Validate() error {
 	if p.Name != nil && *p.Name == "" {
 		return errors.New("name is required")
 	}
-	if p.RunModules != nil && (*p.RunModules < 0 || *p.RunModules > 5) {
-		return errors.New("runModules must be between 0 and 4")
+	if p.RunModules != nil && (*p.RunModules < 0 || *p.RunModules > 6) {
+		return errors.New("runModules must be between 0 and 6")
 	}
 	return nil
 }

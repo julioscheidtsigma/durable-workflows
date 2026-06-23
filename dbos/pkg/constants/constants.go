@@ -9,10 +9,11 @@ type Module int
 const (
 	RUN_MODULES_ALL                  Module = iota // run all modules
 	RUN_MODULES_DATA_COLLECTION                    // run only module 1
-	RUN_MODULES_EVIDENCES_COLLECTION               // run only module 2
-	RUN_MODULES_PEP                                // run only module 3
-	RUN_MODULES_SANCTIONS                          // run only module 4
-	RUN_MODULES_SYNTHESIS                          // run only module 5
+	RUN_MODULES_EVIDENCES_COLLECTION               // 2
+	RUN_MODULES_PEP                                // 3
+	RUN_MODULES_SANCTIONS                          // 4
+	RUN_MODULES_ADVERSE_MEDIA                      // 5
+	RUN_MODULES_SYNTHESIS                          // 6
 )
 
 func (m Module) RunAllModules() bool {
@@ -33,6 +34,8 @@ func ParseRunModule(m int) Module {
 	case 4:
 		module = RUN_MODULES_SANCTIONS
 	case 5:
+		module = RUN_MODULES_ADVERSE_MEDIA
+	case 6:
 		module = RUN_MODULES_SYNTHESIS
 	default:
 	}

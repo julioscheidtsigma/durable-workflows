@@ -8,8 +8,9 @@ type WorkflowResultPhase1 struct {
 }
 
 type WorkflowResultPhase2 struct {
-	OutputPep       ModuleResult `json:"outputPep"`
-	OutputSanctions ModuleResult `json:"outputSanctions"`
+	OutputPep          ModuleResult `json:"outputPep"`
+	OutputSanctions    ModuleResult `json:"outputSanctions"`
+	OutputAdverseMedia ModuleResult `json:"outputAdverseMedia"`
 }
 
 type WorkflowResultPhase3 struct {
