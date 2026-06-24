@@ -349,7 +349,7 @@ func main() {
 	}
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
 
-	fmt.Printf("MainWorkflow: Application Version %+v\n", dbosCtx.GetApplicationVersion())
+	fmt.Printf("Application Version %+v\n", dbosCtx.GetApplicationVersion())
 
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 
