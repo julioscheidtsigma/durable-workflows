@@ -312,11 +312,13 @@ func main() {
 
 	conductorKey := os.Getenv("CONDUCTOR_KEY")
 	dbosCtx, errInit := dbos.NewDBOSContext(ctx, dbos.Config{
-		DatabaseURL:        dbURL,
-		AppName:            "edd",
-		DatabaseSchema:     "dbos", // default
-		ConductorAPIKey:    conductorKey,
-		ApplicationVersion: "1.0.0",
+		DatabaseURL:     dbURL,
+		AppName:         "edd",
+		DatabaseSchema:  "dbos", // default
+		ConductorAPIKey: conductorKey,
+		// By default, application version is automatically computed from a hash of workflow source code.
+		// When DBOS tries to recover workflows, it only recovers workflows whose version matches the current application version.
+		ApplicationVersion: "0.0.1",
 	})
 	if errInit != nil {
 		fmt.Printf("Error creating DBOS: %s\n", errInit)
@@ -331,18 +333,23 @@ func main() {
 
 	eddQueue := dbos.NewWorkflowQueue(dbosCtx, constants.QueueName,
 		dbos.WithWorkerConcurrency(QueueWorkerConcurrency),
-		// dbos.WithGlobalConcurrency(100), // set global concurrency limit for all workflows
+		// dbos.WithGlobalConcurrency(100), // set global concurrency limit for all workflows across multiple processes
 		dbos.WithRateLimiter(rateLimiter),
 		dbos.WithPriorityEnabled(),
 		dbos.WithQueueBasePollingInterval(1*time.Second),
 		dbos.WithQueueMaxPollingInterval(120*time.Second),
 	)
 
+	// This process will only dequeue workflows from the eddQueue
+	dbos.ListenQueues(dbosCtx, eddQueue)
+
 	errLaunch := dbos.Launch(dbosCtx)
 	if errLaunch != nil {
 		fmt.Printf("Error launching DBOS: %s\n", errLaunch)
 	}
 	defer dbos.Shutdown(dbosCtx, 30*time.Second)
+
+	fmt.Printf("MainWorkflow: Application Version %+v\n", dbosCtx.GetApplicationVersion())
 
 	go CollectWorkflowResults(workflows.QueueResultsChan)
 

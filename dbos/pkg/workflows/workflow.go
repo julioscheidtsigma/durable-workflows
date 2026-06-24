@@ -59,6 +59,7 @@ func MainWorkflow(dbosCtx dbos.DBOSContext, params requests.WorkflowRequestParam
 		RunModules:    params.RunModules,
 		WorkflowState: requests.NewWorkflowState(),
 	}
+	fmt.Printf("MainWorkflow: wsGlobalParams %+v\n", wsGlobalParams)
 
 	// running placehold modules between phases to help in the workflow execution graph
 	errPlaceholder1 := MainWorkflowPlaceholderWrapper(dbosCtx, &wsGlobalParams)
